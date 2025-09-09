@@ -1,0 +1,9 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-channel = "2.5.0"
+async-dup = "1.2.4"
+smol = "2.0.2"
