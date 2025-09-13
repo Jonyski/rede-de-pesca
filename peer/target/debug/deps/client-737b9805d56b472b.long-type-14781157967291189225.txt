@@ -1,0 +1,1 @@
+smol::future::Race<{async block@src/main.rs:91:9: 91:14}, {async block@src/main.rs:96:9: 96:14}>
