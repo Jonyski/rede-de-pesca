@@ -1,1 +1,0 @@
-impl std::future::Future<Output = std::result::Result<smol::Async<std::net::TcpStream>, std::io::Error>>
