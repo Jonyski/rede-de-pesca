@@ -1,0 +1,11 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+smol = "2.0.2"
+async-channel = "2.5.0"
+async-dup = "1.2.4"
+clap = { version = "4.5.13", features = ["derive"] }
+rand = "0.9.2"
