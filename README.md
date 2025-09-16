@@ -20,34 +20,59 @@ Os usuários da Rede de Pesca podem:
 - Resposta de pedido de troca de peixe
 
 ## Protocolo
+
 Tipo: Mensagem;
+
 Remetente: @pedrinho
+
 Destinatario: @joao
+
 Texto: "aaaaaaaaaa";
 
+-----------------------------
+
 Tipo: Inspeçao;
+
 Nome: "carinha";
 
+-----------------------------
+
 Tipo: Inventário;
+
 Inventário: peixe1|12,peixes2|13;
 
+-----------------------------
+
 Tipo: Broadcast;
+
 Remetente: @jao
+
 Texto: "pessoa tal achou um peixe raro";
 
+-----------------------------
+
 Tipo: Pedido de Troca;
+
 Proposta: tupiniqui|12 > lambari|1;
 
-Tipo: Confirma Troca;
-Proposta: Sim/Não;
+-----------------------------
 
+Tipo: Confirma Troca;
+
+Proposta: Sim/Não;
 
 ## Comandos
 
-> (broadcast)
-> @joao aaaaaaaaa
-> :[p]escar
-> :[i]nventario
-> :[i]nventario @jao
-> :[t]roca @pedrinho n peixe > m peixe2
-> :[c]onfirmar [s]im/[n]ao
+-> (broadcast)
+
+-> @joao aaaaaaaaa
+
+-> :[p]escar
+
+-> :[i]nventario
+
+-> :[i]nventario @jao
+
+-> :[t]roca @pedrinho n peixe > m peixe2
+
+-> :[c]onfirmar [s]im/[n]ao
