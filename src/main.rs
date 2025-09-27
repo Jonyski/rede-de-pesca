@@ -26,7 +26,7 @@ mod ui;
 mod fishnet_server;
 
 
-/// Endereço de IP do primeiro peer
+/// Endereço de IP do primeiro peer: 127.0.0.1:6000
 const DEFAULT_HOST: ([u8; 4], u16) = ([127, 0, 0, 1], 6000);
 
 
