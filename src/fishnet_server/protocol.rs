@@ -116,10 +116,10 @@ impl Display for FNP {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             FNP::Message { rem, dest, content } => {
-                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: Message; Content: {content};")
+                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: Message; Content: \"{content}\";")
             },
             FNP::Broadcast { rem, content } => {
-                format!("FNP 1.0; REM: {rem}; DEST: fnp://*; CMD: Broadcast; Content: {content};")
+                format!("FNP 1.0; REM: {rem}; DEST: fnp://*; CMD: Broadcast; Content: \"{content}\";")
             },
             FNP::TradeOffer { rem, dest, offer } => {
                 format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: TradeOffer; Offer: {offer};")
@@ -143,6 +143,11 @@ impl Display for FNP {
 pub struct Peer(SocketAddr);
 
 impl Peer {
+    
+    pub fn new(addr: SocketAddr) -> Self {
+        Self(addr)
+    }
+
     pub fn address(&self) -> String {
         self.0.ip().to_string()
     }

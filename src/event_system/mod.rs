@@ -3,11 +3,13 @@ use std::net::{SocketAddr, TcpStream};
 use async_channel::{Receiver, Sender};
 use async_dup::{Arc};
 use std::sync::Mutex;
-use smol::{io::{self, AsyncBufReadExt, AsyncWriteExt}, stream::StreamExt, Async};
+use smol::{io::{self, AsyncBufReadExt, AsyncWriteExt}, stream::StreamExt, Async, Unblock};
 
 mod event;
 
 pub use event::Event;
+
+use crate::fishnet_server::{FNPParser, FNP};
 
 /// Lida com os Eventos emitidos, podendo fazer broadcast
 pub async fn dispatch(
@@ -24,14 +26,24 @@ pub async fn dispatch(
             let (output_str, sender_addr_opt) = match &event {
                 Event::Join(addr, stream) => {
                     streams_guard.push(stream.clone());
-                    (format!("* {} entrou na rede\n", addr), Some(*addr))
+                    (format!("* {} entrou na rede", addr), Some(*addr))
                 }
                 Event::Leave(addr) => {
                     streams_guard
                         .retain(|s| s.get_ref().peer_addr().map_or(false, |peer| peer != *addr));
-                    (format!("* {} saiu\n", addr), Some(*addr))
+                    (format!("* {} saiu", addr), Some(*addr))
                 }
-                Event::Message(addr, msg) => (format!("[{}] - {}\n", *addr, msg), Some(*addr)),
+                Event::Message(addr, msg) => {
+
+                    match msg {
+                        FNP::Broadcast { content, ..} => {
+                            (format!("[{}] - {}", addr, content), Some(*addr))
+                        },
+                        _ => {
+                            todo!("Implementar os outros comandos")
+                        }
+                    }
+                },
                 Event::Pesca => {
                     let fishing_msg = crate::ui::fishing(&fish_catalog);
                     (fishing_msg, None)
@@ -65,13 +77,13 @@ pub async fn dispatch(
                     let message_to_send = network_message.clone();
                     smol::spawn(async move {
                         // Enviando a mensagem bruta e como bytes
-                        stream.write_all(message_to_send.as_bytes()).await.ok();
+                        stream.write_all(message_to_send.as_bytes()).await.expect("Complete failure, dont know why");
                     })
                     .detach();
                 }
             }
             _ => {
-                print!("{}", output);
+                println!("{output}");
             }
         }
     }
@@ -85,7 +97,8 @@ pub async fn read_messages(sender: Sender<Event>, peer: Arc<Async<TcpStream>>) -
     // Toda vez que houver uma nova linha na stream, manda a mensagem pro dispatcher
     while let Some(line) = lines.next().await {
         let line = line?;
-        sender.send(Event::Message(addr, line)).await.ok();
+        let msg = FNPParser::parse(&line).map_err(|e| io::Error::other(e))?;
+        sender.send(Event::Message(addr, msg)).await.ok();
     }
     Ok(())
 }
