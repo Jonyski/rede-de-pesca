@@ -2,6 +2,17 @@
 
 Este é um projeto feito para a matéria de Redes de Computadores
 
+
+## Tarefas
+
+- [ ] Envio de todos os tipos de mensagens pela rede (server/mod.rs)
+- [ ] Tratar a chegada de todos os tipos de mensagens (lib.rs)
+- [ ] Implementar sistema de nomes de usuário
+- [ ] Criar invetario global de peixeis
+- [ ] Implementar sistema de trocas
+- [ ] Implementar uma interface de terminal (tui/mod.rs)
+- [ ] Implementar todos os comandos da interface ($i, $t, etc) (tui/mod.rs)
+
 ## Mecânicas
 
 Os usuários da Rede de Pesca podem:
