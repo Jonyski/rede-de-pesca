@@ -148,8 +148,8 @@ impl Peer {
         Self(addr)
     }
 
-    pub fn address(&self) -> String {
-        self.0.ip().to_string()
+    pub fn address(&self) -> SocketAddr {
+        self.0
     }
 } 
 
@@ -397,8 +397,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::Message { rem, dest, content }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
                 assert_eq!(content, "Hello World");
             }
             _ => panic!("Should parse as Message"),
@@ -416,7 +416,7 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::Broadcast { rem, content }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
                 assert_eq!(content, "Broadcast message");
             }
             _ => panic!("Should parse as Broadcast"),
@@ -434,8 +434,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::TradeOffer { rem, dest, offer }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
                 assert_eq!(offer.offered.len(), 1);
                 assert_eq!(offer.requested.len(), 1);
                 assert_eq!(offer.offered[0].fish_type, "fish1");
@@ -456,8 +456,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::TradeConfirm { rem, dest, response }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
                 assert!(response);
             }
             _ => panic!("Should parse as TradeConfirm with true"),
@@ -475,8 +475,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::TradeConfirm { rem, dest, response }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
                 assert!(!response);
             }
             _ => panic!("Should parse as TradeConfirm with false"),
@@ -493,8 +493,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::InventoryInspection { rem, dest }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
             }
             _ => panic!("Should parse as InventoryInspection"),
         }
@@ -511,8 +511,8 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::InventoryShowcase { rem, dest, inventory }) => {
-                assert_eq!(rem.address(), "127.0.0.1");
-                assert_eq!(dest.address(), "129.0.0.1");
+                assert_eq!(rem.address().to_string(), "127.0.0.1");
+                assert_eq!(dest.address().to_string(), "129.0.0.1");
                 assert_eq!(inventory.items.len(), 3);
                 assert_eq!(inventory.items[0].fish_type, "goldfish");
                 assert_eq!(inventory.items[1].quantity, 1);
@@ -702,8 +702,8 @@ fn test_complete_round_trip() {
     let fnp = FNPParser::parse(original_protocol).unwrap();
     
     if let FNP::TradeOffer { rem, dest, offer } = fnp {
-        assert_eq!(rem.address(), "127.0.0.1");
-        assert_eq!(dest.address(), "129.0.0.1");
+        assert_eq!(rem.address().to_string(), "127.0.0.1");
+        assert_eq!(dest.address().to_string(), "129.0.0.1");
         assert_eq!(offer.offered.len(), 2);
         assert_eq!(offer.requested.len(), 1);
         assert_eq!(offer.to_string(), "goldfish|10,shark|1 > tuna|5");
