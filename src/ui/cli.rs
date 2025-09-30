@@ -33,10 +33,7 @@ impl Args {
 
 /// Parseando e validando os endereços
 fn parse_addr(s: &str) -> Result<SocketAddr, String> {
-    if let Ok(addr) = s.parse::<SocketAddr>() {
-        return Ok(addr);
-    }
-    Err(format!("Invalid bind/peer address: {}", s))
+    s.parse().map_err(|e| format!("Invalid bind/peer address: {}", e))
 }
 
 
