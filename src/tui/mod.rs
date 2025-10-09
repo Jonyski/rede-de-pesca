@@ -5,6 +5,7 @@ mod fisher;
 pub use cli::Args;
 
 use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 
 use async_channel::Sender;
 
@@ -29,6 +30,28 @@ pub async fn eval(sender: Sender<Event>, my_addr: SocketAddr) {
             if line.starts_with("$") {
                 if line == "$p" || line == "$pescar" {
                     sender.send(Event::Pesca).await.ok();
+                }
+                else {
+                    let parts = line.split_whitespace().collect::<Vec<_>>();
+                    if parts[0] == "$i" {
+                        if let Some(peer_addr) = parts.get(1) {
+                            if let Ok(socket) = peer_addr.parse() {
+                                dbg!(socket);
+                                sender.send(Event::UIMessage(server::FNP::InventoryInspection {
+                                    rem: server::Peer::new(my_addr),
+                                    dest: server::Peer::new(socket)
+                                })).await.ok();
+                            } else {
+                                println!("* Invalid peer.");
+                            }
+                        } else {
+                            sender.send(Event::UIMessage(server::FNP::InventoryInspection {
+                                rem: server::Peer::new(my_addr),
+                                dest: server::Peer::new(my_addr),
+                            })).await.ok();
+
+                        }
+                    }
                 }
             } else {
                 let msg = server::FNP::Broadcast { rem: server::protocol::Peer::new(my_addr), content: line};

@@ -47,6 +47,30 @@ pub enum FNP {
     InventoryShowcase { rem: Peer, dest: Peer, inventory: Inventory },
 }
 
+impl FNP {
+    pub fn rem(&self) -> Peer {
+        match self {
+            FNP::Message { rem, .. } |
+            FNP::Broadcast { rem, .. } |
+            FNP::TradeOffer { rem, .. } |
+            FNP::TradeConfirm { rem, .. } |
+            FNP::InventoryInspection { rem, .. } |
+            FNP::InventoryShowcase { rem, .. } => rem.clone()
+        }
+    }
+
+    pub fn dest(&self) -> Option<Peer> {
+        match self {
+            FNP::Broadcast { .. } => None,
+            FNP::Message { dest, .. } |
+            FNP::TradeOffer { dest, .. } |
+            FNP::TradeConfirm { dest, .. } |
+            FNP::InventoryInspection { dest, .. } |
+            FNP::InventoryShowcase { dest, .. } => Some(dest.clone())
+        }
+    }
+} 
+
 
 /// Parser para o FNP
 #[derive(Debug)]
@@ -179,6 +203,15 @@ impl Display for Peer {
 pub struct InventoryItem {
     pub fish_type: String,
     pub quantity: u32,
+}
+
+impl InventoryItem {
+    pub fn new(fish_type: &str, quantity: u32) -> Self {
+        Self {
+            fish_type: fish_type.to_string(),
+            quantity
+        }
+    }
 }
 
 impl Display for InventoryItem {

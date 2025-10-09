@@ -8,6 +8,9 @@ use crate::Event;
 pub mod protocol;
 
 pub use protocol::FNP;
+pub use protocol::Inventory;
+pub use protocol::InventoryItem;
+pub use protocol::Peer;
 
 type PeerStream = Async<TcpStream>;
 
@@ -80,32 +83,39 @@ impl Server {
     }
 
     // Recebe mensagens em FNP produzidas pelo dispatcher através de um channel e processa de acordo.
-    pub async fn receive_messages(&self, receiver: Receiver<FNP>) -> smol::io::Result<()> {
+    pub async fn send_messages(&self, receiver: Receiver<FNP>) -> smol::io::Result<()> {
         while let Ok(msg) = receiver.recv().await {
-            // TODO: implementar o envio de outros tipos de msgs pela rede.
-            // TODO: no caso é necessaŕio enviar para o peer de destinatario
+            // transforma a mensagem em uma string
+            let network_msg = format!("{}\n", msg);
+
+
             match &msg {
-                FNP::Message { rem, dest, content } => todo!(),
                 FNP::Broadcast { .. } => {
-                    let network_msg = format!("{}\n", msg);
                     for stream in self.streams.lock().iter() {
                         let message_to_send = network_msg.clone();
                         let mut stream = stream.clone();
                         smol::spawn(async move {
-                            stream.write_all(message_to_send.as_bytes()).await.expect("Could not write to stream.");
+                            stream.write_all(message_to_send.as_bytes()).await.ok();
                         }).detach();
                     }
                 },
-                FNP::TradeOffer { rem, dest, offer } => todo!(),
-                FNP::TradeConfirm { rem, dest, response } => todo!(),
-                FNP::InventoryInspection { rem, dest } => todo!(),
-                FNP::InventoryShowcase { rem, dest, inventory } => todo!(),
+                // Envia uma mensagem do protocolo para um peer específico
+                FNP::Message { dest, .. } |
+                FNP::TradeOffer { dest, .. } |
+                FNP::InventoryInspection { dest, .. } | 
+                FNP::InventoryShowcase { dest, .. } |
+                FNP::TradeConfirm { dest, .. } => {
+                    let stream = self.streams.lock().iter()
+                        .find(|s| s.get_ref().peer_addr().map_or(false, |addr| addr == dest.address()))
+                        .ok_or(smol::io::Error::other("Peer not found"))?
+                        .clone();
+                    smol::spawn(async move {
+                        stream.clone().write_all(network_msg.as_bytes()).await.unwrap();
+                    }).detach();
+                }
             }
         }
         
         Ok(())
     }
-
-
-    
 }

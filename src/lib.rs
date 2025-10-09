@@ -1,14 +1,15 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use async_channel::{Receiver, Sender};
-
 use async_dup::Mutex;
-use server::Server;
 
 use crate::server::FNP;
 
+pub use crate::inventory::FishBasket;
+
 pub mod server;
 pub mod tui;
+pub mod inventory;
 
 
 pub enum Event {
@@ -24,6 +25,7 @@ pub enum Event {
 pub async fn dispatch(
     server_sender: Sender<FNP>,
     fish_catalog: Arc<tui::FishCatalog>,
+    fish_basket: Arc<Mutex<FishBasket>>,
     receiver: Receiver<Event>,
     ) -> smol::io::Result<()> {
     
@@ -43,19 +45,57 @@ pub async fn dispatch(
                 server::FNP::Broadcast { rem, content } => {
                     println!("{} - {}", rem, content);
                 },
+                server::FNP::InventoryInspection { rem, dest } => {
+                    // Responde uma inspeção com um inventário.
+                    // Cria um inventario no formato do protocolo com base no inventario global
+                    let inventory_items: Vec<server::InventoryItem> = fish_basket.lock().map()
+                        .iter()
+                        .map(|(k, v)| server::InventoryItem::new(&k, *v))
+                        .collect();
+
+                    let fnp = server::FNP::InventoryShowcase{ 
+                        rem: dest,
+                        dest: rem,
+                        inventory: server::Inventory {items: inventory_items}
+                    };
+                    server_sender.send(fnp).await.ok();
+                },
+                server::FNP::InventoryShowcase { rem, inventory, .. } => {
+                    println!("* [{}]: Inventário", rem);
+                    println!("{}", inventory);
+                },
                 server::FNP::TradeOffer { rem, dest, offer } => todo!(),
                 server::FNP::TradeConfirm { rem, dest, response } => todo!(),
-                server::FNP::InventoryInspection { rem, dest } => todo!(),
-                server::FNP::InventoryShowcase { rem, dest, inventory } => todo!(),
             },
+
             // Nesse caso o usuário é o remetente
             Event::UIMessage(fnp) => {
-                server_sender.send(fnp).await.ok();
+                if fnp.dest().map_or(false, |v| v.address() == fnp.rem().address()) {
+                    // Se o protocolo for para o próprio usuário
+                    match fnp {
+                        FNP::InventoryInspection { .. } => {
+                            // Transforma o fish basket em um inventario do protocolo e mostra na
+                            // tela
+                            let inventory_items: Vec<server::InventoryItem> = fish_basket.lock().map()
+                                .iter()
+                                .map(|(k, v)| server::InventoryItem::new(&k, *v))
+                                .collect();
+
+                            println!("{}", server::Inventory { items: inventory_items });
+                        },
+                        _ => println!("* Essa operação não é válida para você mesmo."), // Message, Broadcast, TradeOffer, são todos inválidos se mandados
+                                 // para o próprio usuário.
+                    }
+                } else {
+                    // senão deixa o servidor cuidar disso
+                    server_sender.send(fnp).await.ok();
+                }
             },
             Event::Pesca => {
+                // pesca um peixe e adiciona/incrementa ao inventario
                 let fish = crate::tui::fishing(&fish_catalog);
-                // TODO: add para o inventario
-                println!("{}", fish);
+                fish_basket.lock().map_mut().entry(fish.clone()).and_modify(|f| *f += 1).or_insert(1);
+                println!("Você pescou um(a) {}!", fish);
             }
         }
     }
