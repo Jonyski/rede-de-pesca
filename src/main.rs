@@ -21,6 +21,7 @@ use std::{io::Write, sync::Arc};
 use async_dup::Mutex;
 use clap::Parser;
 use async_channel::unbounded;
+use fishnet::FishBasket;
 use regex::Regex;
 use smol::io;
 
@@ -41,6 +42,7 @@ fn main() -> io::Result<()> {
 
         // iniciando o catalogo de peixes
         let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());        
+        let basket = Arc::new(Mutex::new(FishBasket::new()));
 
         // Criando o listener na porta correspondente
         let host = if args.first() { DEFAULT_HOST.into() } else { args.bind() }; 
@@ -53,10 +55,10 @@ fn main() -> io::Result<()> {
         // são enviadas para o servidor enviar a rede de peers.
         let (ssender, sreceiver) = unbounded();
         let serverc = server.clone();
-        smol::spawn(async move { serverc.receive_messages(sreceiver).await.ok(); }).detach();
+        smol::spawn(async move { serverc.send_messages(sreceiver).await.ok(); }).detach();
 
         // Spawnando o dispatcher. Recebe eventos das outras threads e envia para o servidor e ui
-        smol::spawn(fishnet::dispatch(ssender, fish_catalog.clone(), receiver)).detach();
+        smol::spawn(fishnet::dispatch(ssender, fish_catalog.clone(), basket.clone(), receiver)).detach();
 
         // Dando boas vindas ao usuário
         println!("Escutando no endereço {}", host);

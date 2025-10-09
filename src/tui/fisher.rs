@@ -138,6 +138,6 @@ pub fn fishing(fish_catalog: &FishCatalog) -> String {
             }
         }
     };
-    format!("Você pescou um(a) {}!", fish)
+    format!("{}", fish)
 }
 
