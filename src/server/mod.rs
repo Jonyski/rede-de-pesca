@@ -61,7 +61,8 @@ impl Server {
             let sender = sender.clone();
             smol::spawn(async move {
                 sender.send(Event::Join(addr)).await.ok();
-                Self::read_messages_from(peer, sender.clone()).await.unwrap();
+                Self::read_messages_from(peer, sender.clone()).await
+                    .unwrap_or_else(|err| {eprintln!("{}", err); ()});
                 sender.send(Event::Leave(addr)).await.ok();
             }).detach()
         }
@@ -88,7 +89,9 @@ impl Server {
             match &msg {
                 FNP::Broadcast { .. } => {
                     for stream in self.streams.lock().iter() {
+                        // Altera o remetende para o IP que o peer destinatario esta se comunicando
                         let msg = msg.clone().set_rem(Peer::new(stream.get_ref().local_addr().unwrap()));
+
                         let network_msg = format!("{}\n", msg);
                         let mut stream = stream.clone();
                         smol::spawn(async move {

@@ -55,7 +55,7 @@ fn main() -> io::Result<()> {
         // são enviadas para o servidor enviar a rede de peers.
         let (ssender, sreceiver) = unbounded();
         let serverc = server.clone();
-        smol::spawn(async move { serverc.send_messages(sreceiver).await.unwrap(); }).detach();
+        smol::spawn(async move { serverc.send_messages(sreceiver).await.ok(); }).detach();
 
         // Spawnando o dispatcher. Recebe eventos das outras threads e envia para o servidor e ui
         smol::spawn(fishnet::dispatch(host, ssender, fish_catalog.clone(), basket.clone(), receiver)).detach();
