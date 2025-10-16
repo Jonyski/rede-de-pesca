@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
 use async_channel::{Receiver, Sender};
@@ -25,7 +26,6 @@ pub struct Server {
 impl Server {
 
     pub fn new(hostname: &str, addr: SocketAddr) -> smol::io::Result<Self> {
-        
         let listener = Async::<TcpListener>::bind(addr)?;
 
         Ok(Self {
@@ -54,14 +54,15 @@ impl Server {
             let (stream, addr) = self.listener.accept().await?;
             let peer = Arc::new(stream);
             // TODO: ler o nome de usário do novo peer conectado
-            
+
             // Adiciona na lista de peers
             self.streams.lock().push(peer.clone());
 
             let sender = sender.clone();
             smol::spawn(async move {
                 sender.send(Event::Join(addr)).await.ok();
-                Self::read_messages_from(peer, sender.clone()).await.ok();
+                Self::read_messages_from(peer, sender.clone()).await
+                    .unwrap_or_else(|err| {eprintln!("{}", err); ()});
                 sender.send(Event::Leave(addr)).await.ok();
             }).detach()
         }
@@ -85,37 +86,38 @@ impl Server {
     // Recebe mensagens em FNP produzidas pelo dispatcher através de um channel e processa de acordo.
     pub async fn send_messages(&self, receiver: Receiver<FNP>) -> smol::io::Result<()> {
         while let Ok(msg) = receiver.recv().await {
-            // transforma a mensagem em uma string
-            let network_msg = format!("{}\n", msg);
-
-
             match &msg {
                 FNP::Broadcast { .. } => {
                     for stream in self.streams.lock().iter() {
-                        let message_to_send = network_msg.clone();
+                        // Altera o remetende para o IP que o peer destinatario esta se comunicando
+                        let msg = msg.clone().set_rem(Peer::new(stream.get_ref().local_addr().unwrap()));
+
+                        let network_msg = format!("{}\n", msg);
                         let mut stream = stream.clone();
                         smol::spawn(async move {
-                            stream.write_all(message_to_send.as_bytes()).await.ok();
+                            stream.write_all(network_msg.as_bytes()).await.ok();
                         }).detach();
                     }
                 },
                 // Envia uma mensagem do protocolo para um peer específico
                 FNP::Message { dest, .. } |
                 FNP::TradeOffer { dest, .. } |
-                FNP::InventoryInspection { dest, .. } | 
+                FNP::InventoryInspection { dest, .. } |
                 FNP::InventoryShowcase { dest, .. } |
                 FNP::TradeConfirm { dest, .. } => {
-                    let stream = self.streams.lock().iter()
+                    let mut stream = self.streams.lock().iter()
                         .find(|s| s.get_ref().peer_addr().map_or(false, |addr| addr == dest.address()))
                         .ok_or(smol::io::Error::other("Peer not found"))?
                         .clone();
-                    smol::spawn(async move {
-                        stream.clone().write_all(network_msg.as_bytes()).await.unwrap();
-                    }).detach();
+
+                    // Altera o remetente da mensagem para o endereço que ESTE peer está escutando/esperando a resposta
+                    let msg = msg.set_rem(Peer::new(stream.get_ref().local_addr().unwrap()));
+                    let network_msg = format!("{}\n", msg);
+                    stream.write_all(network_msg.as_bytes()).await?;
                 }
             }
         }
-        
+
         Ok(())
     }
 }

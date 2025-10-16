@@ -1,11 +1,9 @@
 mod cli;
 mod fisher;
 
-
 pub use cli::Args;
 
 use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
 
 use async_channel::Sender;
 
@@ -17,13 +15,14 @@ use smol::Unblock;
 use crate::Event;
 use crate::server;
 
+/// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(sender: Sender<Event>, my_addr: SocketAddr) {
     let stdin = Unblock::new(std::io::stdin());
     let mut lines = smol::io::BufReader::new(stdin).lines();
 
     while let Some(Ok(line)) = lines.next().await {
-        
-        // TODO: parsear o stdin para todas as mensagens e comandos        
+
+        // TODO: parsear o stdin para todas as mensagens e comandos
         // Enviando apenas mensagens não vazias
         if !line.trim().is_empty() {
             // executando comandos
@@ -36,7 +35,6 @@ pub async fn eval(sender: Sender<Event>, my_addr: SocketAddr) {
                     if parts[0] == "$i" {
                         if let Some(peer_addr) = parts.get(1) {
                             if let Ok(socket) = peer_addr.parse() {
-                                dbg!(socket);
                                 sender.send(Event::UIMessage(server::FNP::InventoryInspection {
                                     rem: server::Peer::new(my_addr),
                                     dest: server::Peer::new(socket)
@@ -54,7 +52,19 @@ pub async fn eval(sender: Sender<Event>, my_addr: SocketAddr) {
                     }
                 }
             } else {
-                let msg = server::FNP::Broadcast { rem: server::protocol::Peer::new(my_addr), content: line};
+                let msg = if line.starts_with("@")
+                    && let Some((peer_addr, text)) = line.split_once(" ")
+                    && let Some(strip_addr) = peer_addr.strip_prefix("@")
+                    && let Ok(addr) = strip_addr.parse()
+                {
+                    server::FNP::Message {
+                        rem: server::Peer::new(my_addr),
+                        dest: server::Peer::new(addr), content: text.to_string() }
+                } else {
+                    server::FNP::Broadcast {
+                        rem: server::protocol::Peer::new(my_addr), content: line
+                    }
+                };
                 sender.send(Event::UIMessage(msg)).await.ok();
             }
         }

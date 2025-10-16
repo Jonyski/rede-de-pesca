@@ -1,6 +1,7 @@
 use owo_colors::Style;
 use rand::seq::IndexedRandom;
 
+/// Catálogo de todos os peixes possíveis classificados por raridade
 pub struct FishCatalog {
     abyssals: Vec<String>,
     mythicals: Vec<String>,
@@ -102,7 +103,7 @@ impl FishCatalog {
     }
 }
 
-#[allow(unused_variables)]
+/// Função de pesca, retorna um peixe aleatório do catálogo com distribuição proporcional a raridade
 pub fn fishing(fish_catalog: &FishCatalog) -> String {
     let fish = {
         let mut rng = rand::rng();
@@ -140,4 +141,3 @@ pub fn fishing(fish_catalog: &FishCatalog) -> String {
     };
     format!("{}", fish)
 }
-

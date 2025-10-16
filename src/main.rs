@@ -41,13 +41,13 @@ fn main() -> io::Result<()> {
         let username = ask_username();
 
         // iniciando o catalogo de peixes
-        let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());        
+        let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());
         let basket = Arc::new(Mutex::new(FishBasket::new()));
 
         // Criando o listener na porta correspondente
-        let host = if args.first() { DEFAULT_HOST.into() } else { args.bind() }; 
+        let host = if args.first() { DEFAULT_HOST.into() } else { args.bind() };
         let server = Arc::new(fishnet::server::Server::new(&username, host)?);
-        
+
         // Tentando conectar com os peers que foram passados como argumento
         server.connect_to_many(args.peers(), sender.clone()).await;
 
@@ -58,14 +58,14 @@ fn main() -> io::Result<()> {
         smol::spawn(async move { serverc.send_messages(sreceiver).await.ok(); }).detach();
 
         // Spawnando o dispatcher. Recebe eventos das outras threads e envia para o servidor e ui
-        smol::spawn(fishnet::dispatch(ssender, fish_catalog.clone(), basket.clone(), receiver)).detach();
+        smol::spawn(fishnet::dispatch(host, ssender, fish_catalog.clone(), basket.clone(), receiver)).detach();
 
         // Dando boas vindas ao usuário
         println!("Escutando no endereço {}", host);
         println!("Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)", username);
         // criando nova thread para gerenciar a interface do terminal
         smol::spawn(fishnet::tui::eval(sender.clone(), host)).detach();
-        
+
         // Escutando por novas conexões dos peers. Bloqueia a thread principal
         server.listen(sender.clone()).await
     })
@@ -87,4 +87,4 @@ fn ask_username() -> String {
         println!("Nome de usuário inválido. Seu nome de usuário deve começar com um letras do alfabeto. Ter no mínimo 3 caracteres. Use caracteres alphauméricos, hifes ou underscores.");
         username.clear();
     }
-} 
+}
