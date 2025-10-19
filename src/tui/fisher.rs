@@ -103,6 +103,12 @@ impl FishCatalog {
     }
 }
 
+impl Default for FishCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Função de pesca, retorna um peixe aleatório do catálogo com distribuição proporcional a raridade
 pub fn fishing(fish_catalog: &FishCatalog) -> String {
     let fish = {

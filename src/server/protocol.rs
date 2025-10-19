@@ -29,44 +29,66 @@
  * OfferResponse: true|false;
  * */
 
-
+use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use regex::Regex;
 
 /// Fish Net Protocol
 #[derive(Debug, PartialEq, Clone)]
 pub enum FNP {
-    Message { rem: Peer, dest: Peer, content: String },
-    Broadcast { rem: Peer, content: String },
-    TradeOffer { rem: Peer, dest: Peer, offer: Offer },
-    TradeConfirm { rem: Peer, dest: Peer, response: bool },
-    InventoryInspection { rem: Peer, dest: Peer },
-    InventoryShowcase { rem: Peer, dest: Peer, inventory: Inventory },
+    Message {
+        rem: Peer,
+        dest: Peer,
+        content: String,
+    },
+    Broadcast {
+        rem: Peer,
+        content: String,
+    },
+    TradeOffer {
+        rem: Peer,
+        dest: Peer,
+        offer: Offer,
+    },
+    TradeConfirm {
+        rem: Peer,
+        dest: Peer,
+        response: bool,
+        offer: Offer,
+    },
+    InventoryInspection {
+        rem: Peer,
+        dest: Peer,
+    },
+    InventoryShowcase {
+        rem: Peer,
+        dest: Peer,
+        inventory: Inventory,
+    },
 }
 
 impl FNP {
     pub fn rem(&self) -> Peer {
         match self {
-            FNP::Message { rem, .. } |
-            FNP::Broadcast { rem, .. } |
-            FNP::TradeOffer { rem, .. } |
-            FNP::TradeConfirm { rem, .. } |
-            FNP::InventoryInspection { rem, .. } |
-            FNP::InventoryShowcase { rem, .. } => rem.clone()
+            FNP::Message { rem, .. }
+            | FNP::Broadcast { rem, .. }
+            | FNP::TradeOffer { rem, .. }
+            | FNP::TradeConfirm { rem, .. }
+            | FNP::InventoryInspection { rem, .. }
+            | FNP::InventoryShowcase { rem, .. } => *rem,
         }
     }
 
     pub fn dest(&self) -> Option<Peer> {
         match self {
             FNP::Broadcast { .. } => None,
-            FNP::Message { dest, .. } |
-            FNP::TradeOffer { dest, .. } |
-            FNP::TradeConfirm { dest, .. } |
-            FNP::InventoryInspection { dest, .. } |
-            FNP::InventoryShowcase { dest, .. } => Some(dest.clone())
+            FNP::Message { dest, .. }
+            | FNP::TradeOffer { dest, .. }
+            | FNP::TradeConfirm { dest, .. }
+            | FNP::InventoryInspection { dest, .. }
+            | FNP::InventoryShowcase { dest, .. } => Some(*dest),
         }
     }
 
@@ -76,13 +98,28 @@ impl FNP {
             FNP::Message { dest, content, .. } => FNP::Message { rem, dest, content },
             FNP::Broadcast { content, .. } => FNP::Broadcast { rem, content },
             FNP::TradeOffer { dest, offer, .. } => FNP::TradeOffer { rem, dest, offer },
-            FNP::TradeConfirm { dest, response, .. } => FNP::TradeConfirm { rem, dest, response },
+            FNP::TradeConfirm {
+                dest,
+                response,
+                offer,
+                ..
+            } => FNP::TradeConfirm {
+                rem,
+                dest,
+                response,
+                offer,
+            },
             FNP::InventoryInspection { dest, .. } => FNP::InventoryInspection { rem, dest },
-            FNP::InventoryShowcase { dest, inventory, .. } => FNP::InventoryShowcase { rem, dest, inventory },
+            FNP::InventoryShowcase {
+                dest, inventory, ..
+            } => FNP::InventoryShowcase {
+                rem,
+                dest,
+                inventory,
+            },
         }
     }
 }
-
 
 /// Parser para o FNP
 #[derive(Debug)]
@@ -108,49 +145,50 @@ impl FNPParser {
         // decodifica de acordo com o cmd
         match cmd {
             "Message" => Ok(FNP::Message {
-                rem: rem.clone(),
+                rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
-                content:
-                unescape_semicolons(
-                    &Self::extract_quoted_content(
-                        fields.get("Content")
-                            .ok_or("No Content")
-                        ?)
-                    ?)
+                content: unescape_semicolons(&Self::extract_quoted_content(
+                    fields.get("Content").ok_or("No Content")?,
+                )?),
             }),
             "Broadcast" => Ok(FNP::Broadcast {
                 rem,
-                content:
-                unescape_semicolons(
-                    &Self::extract_quoted_content(
-                        fields.get("Content")
-                            .ok_or("No Content")
-                        ?)
-                    ?)
+                content: unescape_semicolons(&Self::extract_quoted_content(
+                    fields.get("Content").ok_or("No Content")?,
+                )?),
             }),
             "TradeOffer" => Ok(FNP::TradeOffer {
-                rem: rem.clone(),
+                rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
-                offer: Offer::from_str(fields.get("Offer").ok_or("No Offer")?)?
+                offer: Offer::from_str(&unescape_semicolons(
+                    fields.get("Offer").ok_or("No Offer")?,
+                ))?,
             }),
             "TradeConfirm" => Ok(FNP::TradeConfirm {
-                rem: rem.clone(),
+                rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
-                response: fields.get("OfferResponse").ok_or("No CONFIRM")?.parse().map_err(|e: std::str::ParseBoolError| e.to_string())?
+                response: fields
+                    .get("Response")
+                    .ok_or("No CONFIRM")?
+                    .parse()
+                    .map_err(|e: std::str::ParseBoolError| e.to_string())?,
+                offer: Offer::from_str(&unescape_semicolons(
+                    fields.get("Offer").ok_or("No Offer")?,
+                ))?,
             }),
             "InvetoryShowcase" => Ok(FNP::InventoryShowcase {
-                rem: rem.clone(),
+                rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
-                inventory: Inventory::from_str(
-                    &unescape_semicolons(fields.get("Invetory").ok_or("No Invetory")?)
-                )?
+                inventory: Inventory::from_str(&unescape_semicolons(
+                    fields.get("Invetory").ok_or("No Invetory")?,
+                ))?,
             }),
             "InventoryInspection" => Ok(FNP::InventoryInspection {
-                rem: rem.clone(),
+                rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
             }),
 
-            _ => Err(format!("Unknown CMD: {}", cmd))
+            _ => Err(format!("Unknown CMD: {}", cmd)),
         }
     }
 
@@ -169,7 +207,7 @@ fn escape_semicolons(s: &str) -> String {
     s.replace(";", r"\;")
 }
 
-/// Desfaz a função `escape_semicolons`. Subsituit todo os `\;` por `;`
+/// Desfaz a função `escape_semicolons`. Subsitui todos os `\;` por `;`
 fn unescape_semicolons(s: &str) -> String {
     s.replace(r"\;", ";")
 }
@@ -180,27 +218,85 @@ impl Display for FNP {
         let s = match self {
             FNP::Message { rem, dest, content } => {
                 format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: Message; Content: \"{content}\";")
-            },
+            }
             FNP::Broadcast { rem, content } => {
-                format!("FNP 1.0; REM: {rem}; DEST: fnp://*; CMD: Broadcast; Content: \"{content}\";")
-            },
+                format!(
+                    "FNP 1.0; REM: {rem}; DEST: fnp://*; CMD: Broadcast; Content: \"{content}\";"
+                )
+            }
             FNP::TradeOffer { rem, dest, offer } => {
-                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: TradeOffer; Offer: {offer};")
-            },
-            FNP::TradeConfirm { rem, dest, response } => {
-                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: TradeConfirm; Response: {response};")
-            },
+                let scaped_offer = Offer {
+                    offered: offer
+                        .offered
+                        .iter()
+                        .map(|o| InventoryItem {
+                            fish_type: escape_semicolons(&o.fish_type),
+                            quantity: o.quantity,
+                        })
+                        .collect(),
+                    requested: offer
+                        .requested
+                        .iter()
+                        .map(|r| InventoryItem {
+                            fish_type: escape_semicolons(&r.fish_type),
+                            quantity: r.quantity,
+                        })
+                        .collect(),
+                };
+                format!(
+                    "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: TradeOffer; Offer: {scaped_offer};"
+                )
+            }
+            FNP::TradeConfirm {
+                rem,
+                dest,
+                response,
+                offer,
+            } => {
+                let scaped_offer = Offer {
+                    offered: offer
+                        .offered
+                        .iter()
+                        .map(|o| InventoryItem {
+                            fish_type: escape_semicolons(&o.fish_type),
+                            quantity: o.quantity,
+                        })
+                        .collect(),
+                    requested: offer
+                        .requested
+                        .iter()
+                        .map(|r| InventoryItem {
+                            fish_type: escape_semicolons(&r.fish_type),
+                            quantity: r.quantity,
+                        })
+                        .collect(),
+                };
+                format!(
+                    "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: TradeConfirm; Response: {response}; Offer: {scaped_offer};"
+                )
+            }
             FNP::InventoryInspection { rem, dest } => {
                 format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InventoryInspection;")
-            },
-            FNP::InventoryShowcase { rem, dest, inventory } => {
+            }
+            FNP::InventoryShowcase {
+                rem,
+                dest,
+                inventory,
+            } => {
                 // Cria um novo inventario com o pontos e virgulas escapados
                 let inventory = Inventory {
-                    items: inventory.items.iter().map(|i| {
-                        InventoryItem {fish_type: escape_semicolons(&i.fish_type), quantity: i.quantity}
-                        }).collect()
+                    items: inventory
+                        .items
+                        .iter()
+                        .map(|i| InventoryItem {
+                            fish_type: escape_semicolons(&i.fish_type),
+                            quantity: i.quantity,
+                        })
+                        .collect(),
                 };
-                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InvetoryShowcase; Invetory: {inventory};")
+                format!(
+                    "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InvetoryShowcase; Invetory: {inventory};"
+                )
             }
         };
         write!(f, "{}", s)
@@ -212,7 +308,6 @@ impl Display for FNP {
 pub struct Peer(SocketAddr);
 
 impl Peer {
-
     pub fn new(addr: SocketAddr) -> Self {
         Self(addr)
     }
@@ -226,14 +321,12 @@ impl FromStr for Peer {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-
         let sanitized = match s.strip_prefix("fnp://") {
             Some(striped) => striped,
-            None => s
+            None => s,
         };
 
         sanitized.parse().map(Self).map_err(|e| e.to_string())
-
     }
 }
 
@@ -253,8 +346,8 @@ pub struct InventoryItem {
 impl InventoryItem {
     pub fn new(fish_type: String, quantity: u32) -> Self {
         Self {
-            fish_type: fish_type,
-            quantity
+            fish_type,
+            quantity,
         }
     }
 }
@@ -275,7 +368,8 @@ impl FromStr for Inventory {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let items: Result<Vec<InventoryItem>, _> = s.split(',')
+        let items: Result<Vec<InventoryItem>, _> = s
+            .split(',')
             .map(|item| item.trim())
             .filter(|item| !item.is_empty())
             .map(|item| {
@@ -285,8 +379,14 @@ impl FromStr for Inventory {
                     return Err("Invalid inventory item format".to_string());
                 }
                 let fish_type = parts[0].trim().to_string();
-                let quantity = parts[1].trim().parse().map_err(|_| "Invalid quantity".to_string())?;
-                Ok(InventoryItem { fish_type, quantity })
+                let quantity = parts[1]
+                    .trim()
+                    .parse()
+                    .map_err(|_| "Invalid quantity".to_string())?;
+                Ok(InventoryItem {
+                    fish_type,
+                    quantity,
+                })
             })
             .collect();
 
@@ -297,7 +397,9 @@ impl FromStr for Inventory {
 impl Display for Inventory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // converte cada item para string, e junta todos separados por virgula e espaço
-        let s = self.items.iter()
+        let s = self
+            .items
+            .iter()
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(", ");
@@ -331,8 +433,14 @@ impl FromStr for Offer {
                         return Err("Invalid offer item format".to_string());
                     }
                     let fish_type = parts[0].trim().to_string();
-                    let quantity = parts[1].trim().parse().map_err(|_| "Invalid quantity".to_string())?;
-                    Ok(InventoryItem { fish_type, quantity })
+                    let quantity = parts[1]
+                        .trim()
+                        .parse()
+                        .map_err(|_| "Invalid quantity".to_string())?;
+                    Ok(InventoryItem {
+                        fish_type,
+                        quantity,
+                    })
                 })
                 .collect()
         };
@@ -346,18 +454,28 @@ impl FromStr for Offer {
 
 impl Display for Offer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let offered: String = self.offered.iter()
+        let offered: String = self
+            .offered
+            .iter()
             .map(|item| format!("{}|{}", item.fish_type, item.quantity))
             .collect::<Vec<_>>()
             .join(",");
 
-        let requested: String = self.requested.iter()
+        let requested: String = self
+            .requested
+            .iter()
             .map(|item| format!("{}|{}", item.fish_type, item.quantity))
             .collect::<Vec<_>>()
             .join(",");
 
         write!(f, "{} > {}", offered, requested)
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OfferBuff {
+    pub offers_made: HashMap<SocketAddr, Offer>,
+    pub offers_received: HashMap<SocketAddr, Offer>,
 }
 
 #[cfg(test)]
@@ -369,7 +487,6 @@ mod tests {
     fn test_peer_parsing_valid() {
         let peer: Peer = "fnp://127.0.0.1:6000".parse().unwrap();
         assert_eq!(peer.0, "127.0.0.1:6000".parse().unwrap());
-
     }
 
     #[test]
@@ -433,10 +550,12 @@ mod tests {
         assert_eq!(peer.to_string(), "fnp://127.0.0.1:6000");
     }
 
-
     #[test]
     fn test_inventory_item_display() {
-        let item = InventoryItem { fish_type: "goldfish".to_string(), quantity: 10 };
+        let item = InventoryItem {
+            fish_type: "goldfish".to_string(),
+            quantity: 10,
+        };
         assert_eq!(item.to_string(), "goldfish|10");
     }
 
@@ -444,8 +563,14 @@ mod tests {
     fn test_inventory_display() {
         let inventory = Inventory {
             items: vec![
-                InventoryItem { fish_type: "fish1".to_string(), quantity: 10 },
-                InventoryItem { fish_type: "fish2".to_string(), quantity: 5 },
+                InventoryItem {
+                    fish_type: "fish1".to_string(),
+                    quantity: 10,
+                },
+                InventoryItem {
+                    fish_type: "fish2".to_string(),
+                    quantity: 5,
+                },
             ],
         };
         assert_eq!(inventory.to_string(), "fish1|10, fish2|5");
@@ -454,12 +579,14 @@ mod tests {
     #[test]
     fn test_offer_display() {
         let offer = Offer {
-            offered: vec![
-                InventoryItem { fish_type: "fish1".to_string(), quantity: 10 },
-            ],
-            requested: vec![
-                InventoryItem { fish_type: "fish2".to_string(), quantity: 5 },
-            ],
+            offered: vec![InventoryItem {
+                fish_type: "fish1".to_string(),
+                quantity: 10,
+            }],
+            requested: vec![InventoryItem {
+                fish_type: "fish2".to_string(),
+                quantity: 5,
+            }],
         };
         assert_eq!(offer.to_string(), "fish1|10 > fish2|5");
     }
@@ -531,13 +658,23 @@ mod tests {
             DEST: fnp://129.0.0.1:4848;
             CMD: TradeConfirm;
             OfferResponse: true;
+            Offer: fish1|10 > fish2|5;
         "#;
 
         match FNPParser::parse(protocol) {
-            Ok(FNP::TradeConfirm { rem, dest, response }) => {
+            Ok(FNP::TradeConfirm {
+                rem,
+                dest,
+                response,
+                offer,
+            }) => {
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert!(response);
+                assert_eq!(offer.offered.len(), 1);
+                assert_eq!(offer.requested.len(), 1);
+                assert_eq!(offer.offered[0].fish_type, "fish1");
+                assert_eq!(offer.requested[0].quantity, 5);
             }
             _ => panic!("Should parse as TradeConfirm with true"),
         }
@@ -553,7 +690,12 @@ mod tests {
         "#;
 
         match FNPParser::parse(protocol) {
-            Ok(FNP::TradeConfirm { rem, dest, response }) => {
+            Ok(FNP::TradeConfirm {
+                rem,
+                dest,
+                response,
+                offer,
+            }) => {
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert!(!response);
@@ -589,7 +731,11 @@ mod tests {
         "#;
 
         match FNPParser::parse(protocol) {
-            Ok(FNP::InventoryShowcase { rem, dest, inventory }) => {
+            Ok(FNP::InventoryShowcase {
+                rem,
+                dest,
+                inventory,
+            }) => {
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert_eq!(inventory.items.len(), 3);

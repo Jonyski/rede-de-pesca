@@ -18,21 +18,19 @@
 
 use std::{io::Write, sync::Arc};
 
+use async_channel::unbounded;
 use async_dup::Mutex;
 use clap::Parser;
-use async_channel::unbounded;
-use fishnet::FishBasket;
+use fishnet::{FishBasket, server::protocol::OfferBuff};
 use regex::Regex;
 use smol::io;
-
 
 /// Endereço de IP do primeiro peer: 127.0.0.1:6000
 const DEFAULT_HOST: ([u8; 4], u16) = ([127, 0, 0, 1], 6000);
 
-
 fn main() -> io::Result<()> {
     smol::block_on(async {
-         // Decodificando argumentos da linha de comando
+        // Decodificando argumentos da linha de comando
         let args = fishnet::tui::Args::parse();
         // Criando o canal de comunicação entre threads, o receiver vai pro dispatcher
         let (sender, receiver) = unbounded();
@@ -40,12 +38,17 @@ fn main() -> io::Result<()> {
         // Escolhendo um nome/domínio de usuário
         let username = ask_username();
 
-        // iniciando o catalogo de peixes
+        // iniciando o catalogo de peixes e buffer de ofertas
         let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());
         let basket = Arc::new(Mutex::new(FishBasket::new()));
+        let offer_buffers = Arc::new(Mutex::new(OfferBuff::default()));
 
         // Criando o listener na porta correspondente
-        let host = if args.first() { DEFAULT_HOST.into() } else { args.bind() };
+        let host = if args.first() {
+            DEFAULT_HOST.into()
+        } else {
+            args.bind()
+        };
         let server = Arc::new(fishnet::server::Server::new(&username, host)?);
 
         // Tentando conectar com os peers que foram passados como argumento
@@ -55,16 +58,35 @@ fn main() -> io::Result<()> {
         // são enviadas para o servidor enviar a rede de peers.
         let (ssender, sreceiver) = unbounded();
         let serverc = server.clone();
-        smol::spawn(async move { serverc.send_messages(sreceiver).await.ok(); }).detach();
+        smol::spawn(async move {
+            serverc.send_messages(sreceiver).await.ok();
+        })
+        .detach();
 
         // Spawnando o dispatcher. Recebe eventos das outras threads e envia para o servidor e ui
-        smol::spawn(fishnet::dispatch(host, ssender, fish_catalog.clone(), basket.clone(), receiver)).detach();
+        smol::spawn(fishnet::dispatch(
+            host,
+            ssender,
+            fish_catalog.clone(),
+            basket.clone(),
+            offer_buffers.clone(),
+            receiver,
+        ))
+        .detach();
 
         // Dando boas vindas ao usuário
         println!("Escutando no endereço {}", host);
-        println!("Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)", username);
+        println!(
+            "Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)",
+            username
+        );
         // criando nova thread para gerenciar a interface do terminal
-        smol::spawn(fishnet::tui::eval(sender.clone(), host)).detach();
+        smol::spawn(fishnet::tui::eval(
+            sender.clone(),
+            host,
+            offer_buffers.clone(),
+        ))
+        .detach();
 
         // Escutando por novas conexões dos peers. Bloqueia a thread principal
         server.listen(sender.clone()).await
@@ -75,16 +97,21 @@ fn main() -> io::Result<()> {
 /// caracteres, e contenha caracteres alfanuméricos, barra ou underscore)
 fn ask_username() -> String {
     let mut username = String::new();
-    let username_pattern = Regex::new(r"^[A-Za-z][A-Za-z0-9_-]{2,}$").expect("Invalid regex pattern");
+    let username_pattern =
+        Regex::new(r"^[A-Za-z][A-Za-z0-9_-]{2,}$").expect("Invalid regex pattern");
     loop {
         print!("Escolha um nome de usuário: ");
         std::io::stdout().flush().expect("Falha ao limpar o buffer");
-        std::io::stdin().read_line(&mut username).expect("Não foi possível ler da entrada padrão.");
+        std::io::stdin()
+            .read_line(&mut username)
+            .expect("Não foi possível ler da entrada padrão.");
         let name = username.trim();
-        if username_pattern.is_match(&name) {
+        if username_pattern.is_match(name) {
             return name.to_owned();
         }
-        println!("Nome de usuário inválido. Seu nome de usuário deve começar com um letras do alfabeto. Ter no mínimo 3 caracteres. Use caracteres alphauméricos, hifes ou underscores.");
+        println!(
+            "Nome de usuário inválido. Seu nome de usuário deve começar com um letras do alfabeto. Ter no mínimo 3 caracteres. Use caracteres alphauméricos, hifes ou underscores."
+        );
         username.clear();
     }
 }
