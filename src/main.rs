@@ -15,13 +15,14 @@
 //  transformar estas referências em um projeto P2P e que
 //  utiliza o protocolo TCP ao invés de WebSockets.
 // --------------------------------------------------------
+//
 
-use std::{io::Write, sync::Arc};
+use std::{collections::HashMap, io::Write, sync::Arc};
 
 use async_channel::unbounded;
 use async_dup::Mutex;
 use clap::Parser;
-use fishnet::{FishBasket, server::protocol::OfferBuff};
+use fishnet::{FishBasket, PeerRegistry, server::protocol::OfferBuff};
 use regex::Regex;
 use smol::io;
 
@@ -30,65 +31,68 @@ const DEFAULT_HOST: ([u8; 4], u16) = ([127, 0, 0, 1], 6000);
 
 fn main() -> io::Result<()> {
     smol::block_on(async {
-        // Decodificando argumentos da linha de comando
+        // ... (keep setup code as it was in the last correct version)
         let args = fishnet::tui::Args::parse();
-        // Criando o canal de comunicação entre threads, o receiver vai pro dispatcher
         let (sender, receiver) = unbounded();
-
-        // Escolhendo um nome/domínio de usuário
         let username = ask_username();
 
-        // iniciando o catalogo de peixes e buffer de ofertas
         let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());
         let basket = Arc::new(Mutex::new(FishBasket::new()));
         let offer_buffers = Arc::new(Mutex::new(OfferBuff::default()));
+        let peer_registry: PeerRegistry = Arc::new(Mutex::new(HashMap::new()));
 
-        // Criando o listener na porta correspondente
-        let host = if args.first() {
+        let requested_addr = if args.first() {
             DEFAULT_HOST.into()
         } else {
             args.bind()
         };
-        let server = Arc::new(fishnet::server::Server::new(&username, host)?);
 
-        // Tentando conectar com os peers que foram passados como argumento
+        let server = Arc::new(fishnet::server::Server::new(&username, requested_addr)?);
+        let host_peer = server.host_peer().clone();
+        peer_registry
+            .lock()
+            .insert(username.clone(), host_peer.clone());
+        println!("Escutando no endereço {}", host_peer.address());
+
         server.connect_to_many(args.peers(), sender.clone()).await;
 
-        // Cria um channel do dispatcher para o server, mensagens criadas na ui ou no dispatcher
-        // são enviadas para o servidor enviar a rede de peers.
         let (ssender, sreceiver) = unbounded();
         let serverc = server.clone();
+
+        // --- FIX IS HERE ---
+        // Clone the main sender channel to pass to the server's message sending loop.
+        let dispatcher_sender = sender.clone();
         smol::spawn(async move {
-            serverc.send_messages(sreceiver).await.ok();
+            serverc
+                .send_messages(sreceiver, dispatcher_sender)
+                .await
+                .ok();
         })
         .detach();
 
-        // Spawnando o dispatcher. Recebe eventos das outras threads e envia para o servidor e ui
+        // ... (rest of the main function is correct)
         smol::spawn(fishnet::dispatch(
-            host,
+            host_peer.clone(),
             ssender,
             fish_catalog.clone(),
             basket.clone(),
             offer_buffers.clone(),
+            peer_registry.clone(),
             receiver,
         ))
         .detach();
-
-        // Dando boas vindas ao usuário
-        println!("Escutando no endereço {}", host);
         println!(
             "Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)",
             username
         );
-        // criando nova thread para gerenciar a interface do terminal
         smol::spawn(fishnet::tui::eval(
             sender.clone(),
-            host,
+            host_peer.clone(),
             offer_buffers.clone(),
+            peer_registry.clone(),
         ))
         .detach();
 
-        // Escutando por novas conexões dos peers. Bloqueia a thread principal
         server.listen(sender.clone()).await
     })
 }

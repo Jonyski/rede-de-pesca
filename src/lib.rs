@@ -1,5 +1,7 @@
+// src/lib.rs
+
 #![allow(unused)]
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use async_channel::{Receiver, Sender};
 use async_dup::Mutex;
@@ -11,46 +13,55 @@ pub mod inventory;
 pub mod server;
 pub mod tui;
 
-pub enum Event {
-    Join(SocketAddr),           // new peer connect to us :)
-    Leave(SocketAddr),          // peer leave us :(
-    ServerMessage(server::FNP), // a peer send a message
+pub type PeerRegistry = Arc<Mutex<HashMap<String, Peer>>>;
 
-    UIMessage(server::FNP), // we send a message/cmd to dispatcher
-    Pesca,                  // usuario quer pescar
+// Removed Join and Leave, added PeerDisconnected.
+pub enum Event {
+    PeerDisconnected(Peer),
+    ServerMessage(server::FNP),
+    UIMessage(server::FNP),
+    Pesca,
 }
 
-/// Função central de eventos, recebe sinais por channels e envia para outras partes da aplicação, atualizando o estado geral
 pub async fn dispatch(
-    host_addr: SocketAddr,
+    host_peer: Peer,
     server_sender: Sender<FNP>,
     fish_catalog: Arc<tui::FishCatalog>,
     fish_basket: Arc<Mutex<FishBasket>>,
     offer_buffers: Arc<Mutex<OfferBuff>>,
+    peer_registry: PeerRegistry,
     receiver: Receiver<Event>,
 ) -> smol::io::Result<()> {
     while let Ok(event) = receiver.recv().await {
         match event {
-            // Alguem entrou na rede
-            Event::Join(name) => {
-                println!("* {} entrou na rede.", name);
+            Event::PeerDisconnected(peer) => {
+                if peer_registry.lock().remove(peer.username()).is_some() {
+                    println!("* {} ({}) saiu da rede.", peer.username(), peer.address());
+                }
             }
-            // Sairam na rede
-            Event::Leave(name) => {
-                println!("* {} saiu da rede.", name);
-            }
-            // Mensagens vindo da conexao TCP
-            // Nesse caso nosso usuário é o destinatario.
             Event::ServerMessage(fnp) => match fnp {
+                server::FNP::AnnounceName { rem } => {
+                    let mut registry = peer_registry.lock();
+                    if !registry.contains_key(rem.username()) {
+                        println!("* {} ({}) se conectou.", rem.username(), rem.address());
+                        registry.insert(rem.username().to_string(), rem.clone());
+
+                        let peers = registry.values().cloned().collect();
+                        let peer_list_msg = FNP::PeerList {
+                            rem: host_peer.clone(),
+                            dest: rem,
+                            peers,
+                        };
+                        server_sender.send(peer_list_msg).await.ok();
+                    }
+                }
                 server::FNP::Message { rem, content, .. } => {
-                    println!("{} te disse: {}", rem, content);
+                    println!("DM de {}: {}", rem.username(), content);
                 }
                 server::FNP::Broadcast { rem, content } => {
-                    println!("{} - {}", rem, content);
+                    println!("{} - {}", rem.username(), content);
                 }
                 server::FNP::InventoryInspection { rem, dest } => {
-                    // Responde uma inspeção com um inventário.
-                    // Cria um inventario no formato do protocolo com base no inventario global
                     let inventory_items: Vec<server::InventoryItem> = fish_basket
                         .lock()
                         .map()
@@ -59,7 +70,7 @@ pub async fn dispatch(
                         .collect();
 
                     let fnp = server::FNP::InventoryShowcase {
-                        rem: Peer::new(host_addr),
+                        rem: host_peer.clone(),
                         dest: rem,
                         inventory: server::Inventory {
                             items: inventory_items,
@@ -68,16 +79,15 @@ pub async fn dispatch(
                     server_sender.send(fnp).await.ok();
                 }
                 server::FNP::InventoryShowcase { rem, inventory, .. } => {
-                    println!("* [{}]: Inventário", rem);
+                    println!("* [{}]: Inventário", rem.username());
                     println!("{}", inventory);
                 }
                 server::FNP::TradeOffer { rem, dest, offer } => {
-                    // Adicionando a oferta para o fim da fila de ofertas recebidas
                     offer_buffers
                         .lock()
                         .offers_received
                         .insert(rem.address(), offer.clone());
-                    println!("{rem} quer realizar a seguinte troca:");
+                    println!("{} quer realizar a seguinte troca:", rem.username());
                     offer
                         .offered
                         .into_iter()
@@ -87,7 +97,11 @@ pub async fn dispatch(
                         .requested
                         .into_iter()
                         .for_each(|f| println!("- {} {}(s)", f.quantity, f.fish_type));
-                    println!("digite '$c [s]im' para aceitar, ou '$c [n]ao' para recusar");
+                    println!(
+                        "digite '$c [s]im {}' para aceitar, ou '$c [n]ao {}' para recusar",
+                        rem.username(),
+                        rem.username()
+                    );
                 }
                 server::FNP::TradeConfirm {
                     rem,
@@ -96,7 +110,7 @@ pub async fn dispatch(
                     offer,
                 } => {
                     if response {
-                        println!("{} aceitou sua oferta de troca!", rem);
+                        println!("{} aceitou sua oferta de troca!", rem.username());
                         let mut inventory = fish_basket.lock();
                         offer.offered.into_iter().for_each(|f| {
                             println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
@@ -113,23 +127,31 @@ pub async fn dispatch(
                                 .and_modify(|i| *i += f.quantity);
                         });
                     } else {
-                        println!("{} recusou sua oferta de troca :(", rem);
+                        println!("{} recusou sua oferta de troca :(", rem.username());
                     }
                     offer_buffers.lock().offers_made.remove(&rem.address());
                 }
+                server::FNP::PeerList { peers, .. } => {
+                    let mut registry = peer_registry.lock();
+                    for peer in peers {
+                        if !registry.contains_key(peer.username()) {
+                            println!(
+                                "* Adicionando {} ({}) à lista de peers.",
+                                peer.username(),
+                                peer.address()
+                            );
+                            registry.insert(peer.username().to_string(), peer);
+                        }
+                    }
+                }
             },
-
-            // Nesse caso o usuário é o remetente
             Event::UIMessage(fnp) => {
-                // Se o protocolo for para o próprio usuário
                 if fnp
                     .dest()
                     .is_some_and(|v| v.address() == fnp.rem().address())
                 {
                     match fnp {
                         FNP::InventoryInspection { .. } => {
-                            // Transforma o fish basket em um inventario do protocolo e mostra na
-                            // tela
                             let inventory_items: Vec<server::InventoryItem> = fish_basket
                                 .lock()
                                 .map()
@@ -144,12 +166,10 @@ pub async fn dispatch(
                                 }
                             );
                         }
-                        _ => println!("* Essa operação não é válida para você mesmo."), // Message, Broadcast, TradeOffer, são todos inválidos se mandados
-                                                                                        // para o próprio usuário.
+                        _ => println!("* Essa operação não é válida para você mesmo."),
                     }
                 } else {
                     if let FNP::TradeOffer { dest, offer, .. } = fnp.clone() {
-                        // Adicionando a oferta de troca ao buffer de ofertas feitas
                         offer_buffers
                             .lock()
                             .offers_made
@@ -184,12 +204,10 @@ pub async fn dispatch(
                         }
                         offer_buffers.lock().offers_received.remove(&dest.address());
                     }
-                    // senão deixa o servidor cuidar disso
                     server_sender.send(fnp).await.ok();
                 }
             }
             Event::Pesca => {
-                // pesca um peixe e adiciona/incrementa ao inventario
                 let fish = crate::tui::fishing(&fish_catalog);
                 fish_basket
                     .lock()

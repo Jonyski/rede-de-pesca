@@ -17,16 +17,17 @@
  * Inspiração do HTTP/1.1 e do SMTP.
  *
  * FNP 1.0;
- * REM: (fnp://127.0.0.1:6000);
- * DEST: (*|fnp://129.0.0.1:4848);
- * CMD: (Message|Inspection|InvetoryShowcase|Broadcast|TradeOffer|TradeConfirm);
- * [Content|Invetory|Offer|OfferResponse]: *;
+ * REM: (fnp://user@127.0.0.1:6000);
+ * DEST: (*|fnp://user@129.0.0.1:4848);
+ * CMD: (Message|Inspection|InvetoryShowcase|Broadcast|TradeOffer|TradeConfirm|AnnounceName|PeerList);
+ * [Content|Invetory|Offer|OfferResponse|Peers]: *;
  *
  *
  * Content: "text"
  * Invetory: fish|10, fish2|100;
  * Offer: fish1|10 > fish2|10;
  * OfferResponse: true|false;
+ * Peers: user1@127.0.0.1:6000,user2@127.0.0.1:6001;
  * */
 
 use regex::Regex;
@@ -67,32 +68,43 @@ pub enum FNP {
         dest: Peer,
         inventory: Inventory,
     },
+    AnnounceName {
+        rem: Peer,
+    },
+    PeerList {
+        rem: Peer,
+        dest: Peer,
+        peers: Vec<Peer>,
+    },
 }
 
 impl FNP {
-    pub fn rem(&self) -> Peer {
+    pub fn rem(&self) -> &Peer {
         match self {
             FNP::Message { rem, .. }
             | FNP::Broadcast { rem, .. }
             | FNP::TradeOffer { rem, .. }
             | FNP::TradeConfirm { rem, .. }
             | FNP::InventoryInspection { rem, .. }
-            | FNP::InventoryShowcase { rem, .. } => *rem,
+            | FNP::InventoryShowcase { rem, .. }
+            | FNP::AnnounceName { rem }
+            | FNP::PeerList { rem, .. } => rem,
         }
     }
 
-    pub fn dest(&self) -> Option<Peer> {
+    pub fn dest(&self) -> Option<&Peer> {
         match self {
-            FNP::Broadcast { .. } => None,
+            FNP::Broadcast { .. } | FNP::AnnounceName { .. } => None,
             FNP::Message { dest, .. }
             | FNP::TradeOffer { dest, .. }
             | FNP::TradeConfirm { dest, .. }
             | FNP::InventoryInspection { dest, .. }
-            | FNP::InventoryShowcase { dest, .. } => Some(*dest),
+            | FNP::InventoryShowcase { dest, .. }
+            | FNP::PeerList { dest, .. } => Some(dest),
         }
     }
 
-    // Seta o remetente produzindo uma nova instância do protocolo
+    // This function was already correct, but is included for completeness.
     pub fn set_rem(self, rem: Peer) -> Self {
         match self {
             FNP::Message { dest, content, .. } => FNP::Message { rem, dest, content },
@@ -117,6 +129,8 @@ impl FNP {
                 dest,
                 inventory,
             },
+            FNP::AnnounceName { .. } => FNP::AnnounceName { rem },
+            FNP::PeerList { dest, peers, .. } => FNP::PeerList { rem, dest, peers },
         }
     }
 }
@@ -187,7 +201,19 @@ impl FNPParser {
                 rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
             }),
-
+            "AnnounceName" => Ok(FNP::AnnounceName { rem }),
+            "PeerList" => {
+                let peers_str = fields.get("Peers").ok_or("No Peers")?;
+                let peers = peers_str
+                    .split(',')
+                    .map(|s| Peer::from_str(s.trim()))
+                    .collect::<Result<Vec<Peer>, _>>()?;
+                Ok(FNP::PeerList {
+                    rem,
+                    dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
+                    peers,
+                })
+            }
             _ => Err(format!("Unknown CMD: {}", cmd)),
         }
     }
@@ -225,6 +251,7 @@ impl Display for FNP {
                 )
             }
             FNP::TradeOffer { rem, dest, offer } => {
+                // Cria uma nova oferta com os ponto-e-virgulas escapados
                 let scaped_offer = Offer {
                     offered: offer
                         .offered
@@ -253,6 +280,7 @@ impl Display for FNP {
                 response,
                 offer,
             } => {
+                // Cria uma nova oferta com os ponto-e-virgulas escapados
                 let scaped_offer = Offer {
                     offered: offer
                         .offered
@@ -298,22 +326,40 @@ impl Display for FNP {
                     "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InvetoryShowcase; Invetory: {inventory};"
                 )
             }
+            FNP::AnnounceName { rem } => {
+                format!("FNP 1.0; REM: {rem}; CMD: AnnounceName;")
+            }
+            FNP::PeerList { rem, dest, peers } => {
+                let peers_str = peers
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: PeerList; Peers: {peers_str};")
+            }
         };
         write!(f, "{}", s)
     }
 }
 
 // Peer que representa um endereço de socket com o prefixo fnp://
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct Peer(SocketAddr);
+#[derive(Debug, PartialEq, Clone)]
+pub struct Peer {
+    username: String,
+    address: SocketAddr,
+}
 
 impl Peer {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self(addr)
+    pub fn new(username: String, address: SocketAddr) -> Self {
+        Self { username, address }
     }
 
     pub fn address(&self) -> SocketAddr {
-        self.0
+        self.address
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
     }
 }
 
@@ -326,13 +372,20 @@ impl FromStr for Peer {
             None => s,
         };
 
-        sanitized.parse().map(Self).map_err(|e| e.to_string())
+        let parts: Vec<&str> = sanitized.split('@').collect();
+        if parts.len() != 2 {
+            return Err("Invalid peer format".to_string());
+        }
+
+        let username = parts[0].to_string();
+        let address = parts[1].parse::<SocketAddr>().map_err(|e| e.to_string())?;
+        Ok(Self { username, address })
     }
 }
 
 impl Display for Peer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fnp://{}", self.0)
+        write!(f, "fnp://{}@{}", self.username, self.address)
     }
 }
 
@@ -485,8 +538,9 @@ mod tests {
     // Testes para Peer
     #[test]
     fn test_peer_parsing_valid() {
-        let peer: Peer = "fnp://127.0.0.1:6000".parse().unwrap();
-        assert_eq!(peer.0, "127.0.0.1:6000".parse().unwrap());
+        let peer: Peer = "fnp://user@127.0.0.1:6000".parse().unwrap();
+        assert_eq!(peer.username, "user");
+        assert_eq!(peer.address, "127.0.0.1:6000".parse().unwrap());
     }
 
     #[test]
@@ -546,8 +600,11 @@ mod tests {
     // Testes para Display implementations
     #[test]
     fn test_peer_display() {
-        let peer = Peer("127.0.0.1:6000".parse().unwrap());
-        assert_eq!(peer.to_string(), "fnp://127.0.0.1:6000");
+        let peer = Peer {
+            username: "user".to_string(),
+            address: "127.0.0.1:6000".parse().unwrap(),
+        };
+        assert_eq!(peer.to_string(), "fnp://user@127.0.0.1:6000");
     }
 
     #[test]
@@ -595,15 +652,17 @@ mod tests {
     #[test]
     fn test_message_parsing() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: Message;
             Content: "Hello World";
         "#;
 
         match FNPParser::parse(protocol) {
             Ok(FNP::Message { rem, dest, content }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert_eq!(content, "Hello World");
             }
@@ -614,7 +673,7 @@ mod tests {
     #[test]
     fn test_broadcast_parsing() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
+            REM: fnp://user@127.0.0.1:6000;
             DEST: *;
             CMD: Broadcast;
             Content: "Broadcast message";
@@ -622,6 +681,7 @@ mod tests {
 
         match FNPParser::parse(protocol) {
             Ok(FNP::Broadcast { rem, content }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
                 assert_eq!(content, "Broadcast message");
             }
@@ -632,15 +692,17 @@ mod tests {
     #[test]
     fn test_trade_offer_parsing() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeOffer;
             Offer: fish1|10 > fish2|5;
         "#;
 
         match FNPParser::parse(protocol) {
             Ok(FNP::TradeOffer { rem, dest, offer }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert_eq!(offer.offered.len(), 1);
                 assert_eq!(offer.requested.len(), 1);
@@ -654,10 +716,10 @@ mod tests {
     #[test]
     fn test_trade_confirm_parsing_true() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeConfirm;
-            OfferResponse: true;
+            Response: true;
             Offer: fish1|10 > fish2|5;
         "#;
 
@@ -668,7 +730,9 @@ mod tests {
                 response,
                 offer,
             }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert!(response);
                 assert_eq!(offer.offered.len(), 1);
@@ -683,10 +747,11 @@ mod tests {
     #[test]
     fn test_trade_confirm_parsing_false() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeConfirm;
-            OfferResponse: false;
+            Response: false;
+            Offer: fish1|10 > fish2|5;
         "#;
 
         match FNPParser::parse(protocol) {
@@ -694,9 +759,11 @@ mod tests {
                 rem,
                 dest,
                 response,
-                offer,
+                offer: _,
             }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert!(!response);
             }
@@ -707,14 +774,16 @@ mod tests {
     #[test]
     fn test_inventory_inspection_parsing() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: InventoryInspection;
         "#;
 
         match FNPParser::parse(protocol) {
             Ok(FNP::InventoryInspection { rem, dest }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
             }
             _ => panic!("Should parse as InventoryInspection"),
@@ -724,8 +793,8 @@ mod tests {
     #[test]
     fn test_inventory_showcase_parsing() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: InvetoryShowcase;
             Invetory: goldfish|10, shark|1, tuna|5;
         "#;
@@ -736,7 +805,9 @@ mod tests {
                 dest,
                 inventory,
             }) => {
+                assert_eq!(rem.username(), "user");
                 assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+                assert_eq!(dest.username(), "user2");
                 assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
                 assert_eq!(inventory.items.len(), 3);
                 assert_eq!(inventory.items[0].fish_type, "goldfish");
@@ -746,11 +817,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_announce_name_parsing() {
+        let protocol = r#"
+            REM: fnp://new_user@127.0.0.1:6001;
+            CMD: AnnounceName;
+        "#;
+
+        match FNPParser::parse(protocol) {
+            Ok(FNP::AnnounceName { rem }) => {
+                assert_eq!(rem.username(), "new_user");
+                assert_eq!(rem.address().to_string(), "127.0.0.1:6001");
+            }
+            _ => panic!("Should parse as AnnounceName"),
+        }
+    }
+
+    #[test]
+    fn test_peer_list_parsing() {
+        let protocol = r#"
+            REM: fnp://user1@127.0.0.1:6000;
+            DEST: fnp://new_user@127.0.0.1:6001;
+            CMD: PeerList;
+            Peers: fnp://user1@127.0.0.1:6000,fnp://user2@127.0.0.1:6002;
+        "#;
+
+        match FNPParser::parse(protocol) {
+            Ok(FNP::PeerList { rem, dest, peers }) => {
+                assert_eq!(rem.username(), "user1");
+                assert_eq!(dest.username(), "new_user");
+                assert_eq!(peers.len(), 2);
+                assert_eq!(peers[0].username(), "user1");
+                assert_eq!(peers[1].address().to_string(), "127.0.0.1:6002");
+            }
+            _ => panic!("Should parse as PeerList"),
+        }
+    }
+
     // Testes de erro
     #[test]
     fn test_missing_rem_field() {
         let protocol = r#"
-            DEST: fnp://129.0.0.1:4848;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: Message;
             Content: "test";
         "#;
@@ -763,8 +871,8 @@ mod tests {
     #[test]
     fn test_missing_cmd_field() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             Content: "test";
         "#;
 
@@ -776,8 +884,8 @@ mod tests {
     #[test]
     fn test_unknown_command() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: UnknownCommand;
             Content: "test";
         "#;
@@ -790,10 +898,11 @@ mod tests {
     #[test]
     fn test_invalid_offer_response() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeConfirm;
-            OfferResponse: invalid;
+            Response: invalid;
+            Offer: fish1|1 > fish2|1;
         "#;
 
         let result = FNPParser::parse(protocol);
@@ -805,7 +914,7 @@ mod tests {
     fn test_invalid_peer_format() {
         let protocol = r#"
             REM: invalid_format;
-            DEST: fnp://129.0.0.1:4848;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: Message;
             Content: "test";
         "#;
@@ -817,8 +926,8 @@ mod tests {
     #[test]
     fn test_invalid_inventory_format() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: InvetoryShowcase;
             Invetory: invalid;
         "#;
@@ -830,8 +939,8 @@ mod tests {
     #[test]
     fn test_invalid_offer_format() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeOffer;
             Offer: invalid;
         "#;
@@ -844,8 +953,8 @@ mod tests {
     #[test]
     fn test_empty_content() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: Message;
             Content: "";
         "#;
@@ -861,8 +970,8 @@ mod tests {
     #[test]
     fn test_special_characters_in_content() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: Message;
             Content: "Hello\nWorld\tTest";
         "#;
@@ -878,8 +987,8 @@ mod tests {
     #[test]
     fn test_complex_trade_offer() {
         let protocol = r#"
-            REM: fnp://127.0.0.1:6000;
-            DEST: fnp://129.0.0.1:4848;
+            REM: fnp://user@127.0.0.1:6000;
+            DEST: fnp://user2@129.0.0.1:4848;
             CMD: TradeOffer;
             Offer: fish1|10,fish2|5,fish3|3 > fish4|8,fish5|2;
         "#;
@@ -899,10 +1008,10 @@ mod tests {
     #[test]
     fn test_various_spacing_formats() {
         let protocols = vec![
-            r#"REM:fnp://127.0.0.1:6000;DEST:fnp://129.0.0.1:4848;CMD:Message;Content:"test";"#,
-            r#"REM: fnp://127.0.0.1:6000 ; DEST: fnp://129.0.0.1:4848 ; CMD: Message; Content: "test" ;"#,
-            r#"  REM: fnp://127.0.0.1:6000;
-                DEST: fnp://129.0.0.1:4848;
+            r#"REM:fnp://u@1.1.1.1:1;DEST:fnp://u2@2.2.2.2:2;CMD:Message;Content:"test";"#,
+            r#"REM: fnp://u@1.1.1.1:1 ; DEST: fnp://u2@2.2.2.2:2 ; CMD: Message; Content: "test" ;"#,
+            r#"  REM: fnp://u@1.1.1.1:1;
+                DEST: fnp://u2@2.2.2.2:2;
                 CMD: Message;
                 Content: "test";"#,
         ];
@@ -918,8 +1027,8 @@ mod tests {
 #[test]
 fn test_complete_round_trip() {
     let original_protocol = r#"
-        REM: fnp://127.0.0.1:6000;
-        DEST: fnp://129.0.0.1:4848;
+        REM: fnp://user@127.0.0.1:6000;
+        DEST: fnp://user2@129.0.0.1:4848;
         CMD: TradeOffer;
         Offer: goldfish|10,shark|1 > tuna|5;
     "#;
@@ -927,7 +1036,9 @@ fn test_complete_round_trip() {
     let fnp = FNPParser::parse(original_protocol).unwrap();
 
     if let FNP::TradeOffer { rem, dest, offer } = fnp {
+        assert_eq!(rem.username(), "user");
         assert_eq!(rem.address().to_string(), "127.0.0.1:6000");
+        assert_eq!(dest.username(), "user2");
         assert_eq!(dest.address().to_string(), "129.0.0.1:4848");
         assert_eq!(offer.offered.len(), 2);
         assert_eq!(offer.requested.len(), 1);
