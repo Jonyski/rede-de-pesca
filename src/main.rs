@@ -31,7 +31,6 @@ const DEFAULT_HOST: ([u8; 4], u16) = ([127, 0, 0, 1], 6000);
 
 fn main() -> io::Result<()> {
     smol::block_on(async {
-        // ... (keep setup code as it was in the last correct version)
         let args = fishnet::tui::Args::parse();
         let (sender, receiver) = unbounded();
         let username = ask_username();
@@ -41,6 +40,7 @@ fn main() -> io::Result<()> {
         let offer_buffers = Arc::new(Mutex::new(OfferBuff::default()));
         let peer_registry: PeerRegistry = Arc::new(Mutex::new(HashMap::new()));
 
+        // O primeiro peer sempre se conecta na porta 6000, os outros escolhem
         let requested_addr = if args.first() {
             DEFAULT_HOST.into()
         } else {
@@ -54,13 +54,13 @@ fn main() -> io::Result<()> {
             .insert(username.clone(), host_peer.clone());
         println!("Escutando no endereço {}", host_peer.address());
 
+        // Conectando com os peers passados como argumento
         server.connect_to_many(args.peers(), sender.clone()).await;
 
         let (ssender, sreceiver) = unbounded();
         let serverc = server.clone();
 
-        // --- FIX IS HERE ---
-        // Clone the main sender channel to pass to the server's message sending loop.
+        // Spawna a thread do servidor que envia mensagens para o dispatcher
         let dispatcher_sender = sender.clone();
         smol::spawn(async move {
             serverc
@@ -70,7 +70,7 @@ fn main() -> io::Result<()> {
         })
         .detach();
 
-        // ... (rest of the main function is correct)
+        // Spawna a thread do dispatcher
         smol::spawn(fishnet::dispatch(
             host_peer.clone(),
             ssender,
@@ -85,14 +85,18 @@ fn main() -> io::Result<()> {
             "Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)",
             username
         );
+
+        // Spawna o handler de inputs do usuário, que envia msgs de UI para o dispatcher
         smol::spawn(fishnet::tui::eval(
             sender.clone(),
             host_peer.clone(),
             offer_buffers.clone(),
             peer_registry.clone(),
+            basket.clone(),
         ))
         .detach();
 
+        // Deixa o server escutando sempre novas conexões de peers entrando na rede de pesca
         server.listen(sender.clone()).await
     })
 }
@@ -114,7 +118,7 @@ fn ask_username() -> String {
             return name.to_owned();
         }
         println!(
-            "Nome de usuário inválido. Seu nome de usuário deve começar com um letras do alfabeto. Ter no mínimo 3 caracteres. Use caracteres alphauméricos, hifes ou underscores."
+            "Nome de usuário inválido. Seu nome de usuário deve\n- Começar com um letras do alfabeto\n- Ter no mínimo 3 caracteres\n- Usar apenas letras, números, hífens ou underscores."
         );
         username.clear();
     }

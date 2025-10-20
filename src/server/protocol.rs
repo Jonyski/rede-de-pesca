@@ -311,7 +311,7 @@ impl Display for FNP {
                 dest,
                 inventory,
             } => {
-                // Cria um novo inventario com o pontos e virgulas escapados
+                // Cria um novo inventario com o ponto-e-virgulas escapados
                 let inventory = Inventory {
                     items: inventory
                         .items
@@ -342,7 +342,7 @@ impl Display for FNP {
     }
 }
 
-// Peer que representa um endereço de socket com o prefixo fnp://
+/// Peer que representa um username e um endereço de socket com o prefixo fnp://
 #[derive(Debug, PartialEq, Clone)]
 pub struct Peer {
     username: String,

@@ -15,14 +15,19 @@ pub mod tui;
 
 pub type PeerRegistry = Arc<Mutex<HashMap<String, Peer>>>;
 
-// Removed Join and Leave, added PeerDisconnected.
+/// Os 4 tipos de eventos com os quais o dispatcher lida
 pub enum Event {
+    /// Foi percebido que um peer saiu da rede
     PeerDisconnected(Peer),
+    /// Mensagem FNP chegando de um peer
     ServerMessage(server::FNP),
+    /// Mensagem FNP chegando do próprio peer para ser enviada a outro(s)
     UIMessage(server::FNP),
+    /// O peer está tentando pescar
     Pesca,
 }
 
+/// Recebe todos os tipos de Eventos e realiza a ação/efeito colateral de cada um
 pub async fn dispatch(
     host_peer: Peer,
     server_sender: Sender<FNP>,
@@ -41,6 +46,7 @@ pub async fn dispatch(
             }
             Event::ServerMessage(fnp) => match fnp {
                 server::FNP::AnnounceName { rem } => {
+                    // Anúncio de nome e conexão, atualiza o registro de peers
                     let mut registry = peer_registry.lock();
                     if !registry.contains_key(rem.username()) {
                         println!("* {} ({}) se conectou.", rem.username(), rem.address());
@@ -79,14 +85,16 @@ pub async fn dispatch(
                     server_sender.send(fnp).await.ok();
                 }
                 server::FNP::InventoryShowcase { rem, inventory, .. } => {
-                    println!("* [{}]: Inventário", rem.username());
+                    println!("* Inventário de {}", rem.username());
                     println!("{}", inventory);
                 }
                 server::FNP::TradeOffer { rem, dest, offer } => {
+                    // Adicionando ao buffer de ofertas recebidas
                     offer_buffers
                         .lock()
                         .offers_received
                         .insert(rem.address(), offer.clone());
+                    // Exibindo os peixes ofertados e requisitados pelo remetente
                     println!("{} quer realizar a seguinte troca:", rem.username());
                     offer
                         .offered
@@ -110,7 +118,7 @@ pub async fn dispatch(
                     offer,
                 } => {
                     if response {
-                        println!("{} aceitou sua oferta de troca!", rem.username());
+                        println!("{} aceitou sua oferta de troca :)", rem.username());
                         let mut inventory = fish_basket.lock();
                         offer.offered.into_iter().for_each(|f| {
                             println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
@@ -146,6 +154,7 @@ pub async fn dispatch(
                 }
             },
             Event::UIMessage(fnp) => {
+                // Um evento d
                 if fnp
                     .dest()
                     .is_some_and(|v| v.address() == fnp.rem().address())
@@ -168,44 +177,45 @@ pub async fn dispatch(
                         }
                         _ => println!("* Essa operação não é válida para você mesmo."),
                     }
-                } else {
-                    if let FNP::TradeOffer { dest, offer, .. } = fnp.clone() {
-                        offer_buffers
-                            .lock()
-                            .offers_made
-                            .insert(dest.address(), offer.clone());
-                    }
-                    if let FNP::TradeConfirm {
-                        rem,
-                        dest,
-                        response,
-                        offer,
-                    } = fnp.clone()
-                    {
-                        if response {
-                            println!("-- OFERTA ACEITA --");
-                            let mut inventory = fish_basket.lock();
-                            offer.offered.into_iter().for_each(|f| {
-                                println!("voce ganhou {} {}(s)", f.quantity, f.fish_type);
-                                inventory
-                                    .map_mut()
-                                    .entry(f.fish_type)
-                                    .and_modify(|i| *i += f.quantity);
-                            });
-                            offer.requested.into_iter().for_each(|f| {
-                                println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
-                                inventory
-                                    .map_mut()
-                                    .entry(f.fish_type)
-                                    .and_modify(|i| *i -= f.quantity);
-                            });
-                        } else {
-                            println!("-- OFERTA RECUSADA --");
-                        }
-                        offer_buffers.lock().offers_received.remove(&dest.address());
-                    }
-                    server_sender.send(fnp).await.ok();
+                    continue;
                 }
+                if let FNP::TradeOffer { dest, offer, .. } = fnp.clone() {
+                    println!("-- OFERTA FEITA --");
+                    offer_buffers
+                        .lock()
+                        .offers_made
+                        .insert(dest.address(), offer.clone());
+                }
+                if let FNP::TradeConfirm {
+                    rem,
+                    dest,
+                    response,
+                    offer,
+                } = fnp.clone()
+                {
+                    if response {
+                        println!("-- OFERTA ACEITA --");
+                        let mut inventory = fish_basket.lock();
+                        offer.offered.into_iter().for_each(|f| {
+                            println!("voce ganhou {} {}(s)", f.quantity, f.fish_type);
+                            inventory
+                                .map_mut()
+                                .entry(f.fish_type)
+                                .and_modify(|i| *i += f.quantity);
+                        });
+                        offer.requested.into_iter().for_each(|f| {
+                            println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
+                            inventory
+                                .map_mut()
+                                .entry(f.fish_type)
+                                .and_modify(|i| *i -= f.quantity);
+                        });
+                    } else {
+                        println!("-- OFERTA RECUSADA --");
+                    }
+                    offer_buffers.lock().offers_received.remove(&dest.address());
+                }
+                server_sender.send(fnp).await.ok();
             }
             Event::Pesca => {
                 let fish = crate::tui::fishing(&fish_catalog);

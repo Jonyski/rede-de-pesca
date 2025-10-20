@@ -76,8 +76,6 @@ impl Server {
 
             let sender = sender.clone();
             smol::spawn(async move {
-                // This task now only reads messages until the connection closes.
-                // No more "entrou/saiu" spam.
                 Self::read_messages_from(peer, sender.clone()).await.ok();
             })
             .detach();
