@@ -86,7 +86,15 @@ pub async fn dispatch(
                 }
                 server::FNP::InventoryShowcase { rem, inventory, .. } => {
                     println!("* Inventário de {}", rem.username());
-                    println!("{}", inventory);
+                    if inventory.items.is_empty() {
+                        println!("[Inventário vazio]");
+                    } else {
+                        // Style the inventory for display
+                        for item in &inventory.items {
+                            let style = fish_catalog.get_style_for_fish(&item.fish_type);
+                            println!("  - {} {}(s)", item.quantity, style.style(&item.fish_type));
+                        }
+                    }
                 }
                 server::FNP::TradeOffer { rem, dest, offer } => {
                     // Adicionando ao buffer de ofertas recebidas
@@ -118,24 +126,36 @@ pub async fn dispatch(
                     offer,
                 } => {
                     if response {
-                        println!("{} aceitou sua oferta de troca :)", rem.username());
+                        println!("* {} aceitou sua oferta de troca :)", rem.username());
                         let mut inventory = fish_basket.lock();
-                        offer.offered.into_iter().for_each(|f| {
-                            println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
-                            inventory
-                                .map_mut()
-                                .entry(f.fish_type)
-                                .and_modify(|i| *i -= f.quantity);
-                        });
-                        offer.requested.into_iter().for_each(|f| {
-                            println!("voce ganhou {} {}(s)", f.quantity, f.fish_type);
-                            inventory
-                                .map_mut()
-                                .entry(f.fish_type)
-                                .and_modify(|i| *i += f.quantity);
-                        });
+                        // Removendo os peixes que você deu
+                        for item in offer.offered {
+                            let style = fish_catalog.get_style_for_fish(&item.fish_type);
+                            println!(
+                                "* Você perdeu {} {}(s)",
+                                item.quantity,
+                                style.style(&item.fish_type)
+                            );
+                            if let Some(count) = inventory.map_mut().get_mut(&item.fish_type) {
+                                *count -= item.quantity;
+                                if *count == 0 {
+                                    inventory.map_mut().remove(&item.fish_type);
+                                }
+                            }
+                        }
+                        // Adicionando os peixes que você recebeu
+                        for item in offer.requested {
+                            let style = fish_catalog.get_style_for_fish(&item.fish_type);
+                            println!(
+                                "* Você ganhou {} {}(s)",
+                                item.quantity,
+                                style.style(&item.fish_type)
+                            );
+                            *inventory.map_mut().entry(item.fish_type).or_insert(0) +=
+                                item.quantity;
+                        }
                     } else {
-                        println!("{} recusou sua oferta de troca :(", rem.username());
+                        println!("* {} recusou sua oferta de troca :(", rem.username());
                     }
                     offer_buffers.lock().offers_made.remove(&rem.address());
                 }
@@ -154,78 +174,120 @@ pub async fn dispatch(
                 }
             },
             Event::UIMessage(fnp) => {
-                // Um evento d
+                // Lida com mensagens eviadas do cliente para ele mesmo
                 if fnp
                     .dest()
-                    .is_some_and(|v| v.address() == fnp.rem().address())
+                    .is_some_and(|d| d.address() == fnp.rem().address())
                 {
-                    match fnp {
-                        FNP::InventoryInspection { .. } => {
-                            let inventory_items: Vec<server::InventoryItem> = fish_basket
-                                .lock()
-                                .map()
-                                .iter()
-                                .map(|(k, v)| server::InventoryItem::new(k.to_string(), *v))
-                                .collect();
-
-                            println!(
-                                "{}",
-                                server::Inventory {
-                                    items: inventory_items
-                                }
-                            );
+                    if let FNP::InventoryInspection { .. } = fnp {
+                        let inventory = fish_basket.lock();
+                        if inventory.map().is_empty() {
+                            println!("* Seu inventário está vazio.");
+                        } else {
+                            println!("* Seu inventário:");
+                            for (fish_type, quantity) in inventory.map().iter() {
+                                let style = fish_catalog.get_style_for_fish(fish_type);
+                                println!("- {} {}(s)", quantity, style.style(fish_type));
+                            }
                         }
-                        _ => println!("* Essa operação não é válida para você mesmo."),
+                    } else {
+                        println!("* Essa operação não é válida para você mesmo.");
                     }
                     continue;
                 }
-                if let FNP::TradeOffer { dest, offer, .. } = fnp.clone() {
-                    println!("-- OFERTA FEITA --");
-                    offer_buffers
-                        .lock()
-                        .offers_made
-                        .insert(dest.address(), offer.clone());
-                }
-                if let FNP::TradeConfirm {
-                    rem,
-                    dest,
-                    response,
-                    offer,
-                } = fnp.clone()
-                {
-                    if response {
-                        println!("-- OFERTA ACEITA --");
-                        let mut inventory = fish_basket.lock();
-                        offer.offered.into_iter().for_each(|f| {
-                            println!("voce ganhou {} {}(s)", f.quantity, f.fish_type);
-                            inventory
-                                .map_mut()
-                                .entry(f.fish_type)
-                                .and_modify(|i| *i += f.quantity);
-                        });
-                        offer.requested.into_iter().for_each(|f| {
-                            println!("voce perdeu {} {}(s)", f.quantity, f.fish_type);
-                            inventory
-                                .map_mut()
-                                .entry(f.fish_type)
-                                .and_modify(|i| *i -= f.quantity);
-                        });
-                    } else {
-                        println!("-- OFERTA RECUSADA --");
+                // Lida com mensagens enviadas do cliente para outro peer
+                match &fnp {
+                    FNP::TradeConfirm {
+                        dest,
+                        response,
+                        offer,
+                        ..
+                    } => {
+                        if *response {
+                            let mut is_valid = true;
+                            // Criando um escopo para evitar bugs com o Lock
+                            {
+                                let mut inventory = fish_basket.lock();
+                                // Validação da oferta de troca recebida checando se o cliente tem
+                                // peixes o suficiente para aceitar a troca
+                                for item in &offer.requested {
+                                    let available =
+                                        inventory.map().get(&item.fish_type).copied().unwrap_or(0);
+                                    if available < item.quantity {
+                                        println!(
+                                            "* Troca inválida! Você não tem mais {} {}(s).",
+                                            item.quantity, item.fish_type
+                                        );
+                                        is_valid = false;
+                                        break;
+                                    }
+                                }
+                                // Se a troca não for válida, mantém a proposta no buffer
+                                // Caso contrário, execute a resposta decidida pelo usuário
+                                if !is_valid {
+                                    continue;
+                                } else {
+                                    println!("-- OFERTA ACEITA --");
+                                    for item in &offer.offered {
+                                        let style =
+                                            fish_catalog.get_style_for_fish(&item.fish_type);
+                                        println!(
+                                            "* Você ganhou {} {}(s)",
+                                            item.quantity,
+                                            style.style(&item.fish_type)
+                                        );
+                                        *inventory
+                                            .map_mut()
+                                            .entry(item.fish_type.clone())
+                                            .or_insert(0) += item.quantity;
+                                    }
+                                    for item in &offer.requested {
+                                        let style =
+                                            fish_catalog.get_style_for_fish(&item.fish_type);
+                                        println!(
+                                            "* Você perdeu {} {}(s)",
+                                            item.quantity,
+                                            style.style(&item.fish_type)
+                                        );
+                                        if let Some(count) =
+                                            inventory.map_mut().get_mut(&item.fish_type)
+                                        {
+                                            *count = count.saturating_sub(item.quantity);
+                                            if *count == 0 {
+                                                inventory.map_mut().remove(&item.fish_type);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("-- OFERTA RECUSADA --");
+                        }
+                        offer_buffers.lock().offers_received.remove(&dest.address());
                     }
-                    offer_buffers.lock().offers_received.remove(&dest.address());
+                    FNP::TradeOffer { dest, offer, .. } => {
+                        println!("-- OFERTA FEITA --");
+                        offer_buffers
+                            .lock()
+                            .offers_made
+                            .insert(dest.address(), offer.clone());
+                    }
+                    _ => {}
                 }
+                // Enviando a mensagem FNP definida no bloco match acima
                 server_sender.send(fnp).await.ok();
             }
             Event::Pesca => {
-                let fish = crate::tui::fishing(&fish_catalog);
+                let plain_fish = crate::tui::fishing(&fish_catalog);
                 fish_basket
                     .lock()
                     .map_mut()
-                    .entry(fish.clone())
+                    .entry(plain_fish.clone())
                     .and_modify(|f| *f += 1)
                     .or_insert(1);
-                println!("Você pescou um(a) {}!", fish);
+
+                let style = fish_catalog.get_style_for_fish(&plain_fish);
+                println!("Você pescou um(a) {}!", style.style(&plain_fish));
             }
         }
     }

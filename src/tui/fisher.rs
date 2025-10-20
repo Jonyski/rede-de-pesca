@@ -75,7 +75,7 @@ impl FishCatalog {
             // Peixes míticos: 2.5% de ocorrência
             legendaries: vec![
                 String::from("peixe-serra"),
-                String::from("marlin azul"),
+                String::from("marlin-azul"),
                 String::from("peixe-espada"),
                 String::from("baleia-jubarte"),
                 String::from("enguia-pelicano"),
@@ -101,6 +101,24 @@ impl FishCatalog {
             ],
         }
     }
+    /// Retorna o estilo para a string de um peixe de acordo com a raridade
+    pub fn get_style_for_fish(&self, fish_name: &str) -> Style {
+        if self.abyssals.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<150, 0, 60>().bold()
+        } else if self.mythicals.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<255, 130, 60>().bold()
+        } else if self.legendaries.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<240, 200, 60>().bold()
+        } else if self.shiny.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<255, 80, 135>().bold()
+        } else if self.epics.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<160, 15, 230>().bold()
+        } else if self.rares.iter().any(|f| f == fish_name) {
+            Style::new().fg_rgb::<80, 150, 255>().bold()
+        } else {
+            Style::new().fg_rgb::<100, 255, 160>().bold()
+        }
+    }
 }
 
 impl Default for FishCatalog {
@@ -111,39 +129,19 @@ impl Default for FishCatalog {
 
 /// Função de pesca, retorna um peixe aleatório do catálogo com distribuição proporcional a raridade
 pub fn fishing(fish_catalog: &FishCatalog) -> String {
-    let fish = {
-        let mut rng = rand::rng();
-        let x = rand::random_range(1..=200);
-        match x {
-            1 => {
-                let fish = fish_catalog.abyssals.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<150, 0, 60>().bold().style(fish)
-            }
-            2..=3 => {
-                let fish = fish_catalog.mythicals.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<255, 130, 60>().bold().style(fish)
-            }
-            4..=8 => {
-                let fish = fish_catalog.legendaries.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<240, 200, 60>().bold().style(fish)
-            }
-            9..=20 => {
-                let fish = fish_catalog.shiny.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<255, 80, 135>().bold().style(fish)
-            }
-            21..=50 => {
-                let fish = fish_catalog.epics.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<160, 15, 230>().bold().style(fish)
-            }
-            61..=100 => {
-                let fish = fish_catalog.rares.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<80, 150, 255>().bold().style(fish)
-            }
-            _ => {
-                let fish = fish_catalog.commons.choose(&mut rng).unwrap();
-                Style::new().fg_rgb::<100, 255, 160>().bold().style(fish)
-            }
-        }
+    let mut rng = rand::rng();
+    // Probabilidades: 50% comum, 25% raro, 15% épico, 6% shiny, 2.5% lendário, 1% mítico, 0.5% abissal
+    let x: u32 = rand::random::<u32>() % 200;
+
+    let fish_list = match x {
+        0 => &fish_catalog.abyssals,
+        1..=2 => &fish_catalog.mythicals,
+        3..=7 => &fish_catalog.legendaries,
+        8..=19 => &fish_catalog.shiny,
+        20..=49 => &fish_catalog.epics,
+        50..=99 => &fish_catalog.rares,
+        _ => &fish_catalog.commons,
     };
-    format!("{}", fish)
+
+    fish_list.choose(&mut rng).unwrap().clone()
 }

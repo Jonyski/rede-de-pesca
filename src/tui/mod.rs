@@ -90,14 +90,53 @@ pub async fn eval(
                 if let Some(peer_name) = parts.get(1) {
                     if let Some(peer) = peer_registry.lock().get(*peer_name) {
                         if let Ok(offer) = Offer::from_str(&parts[2..].join(" ")) {
-                            sender
-                                .send(Event::UIMessage(server::FNP::TradeOffer {
-                                    rem: my_peer.clone(),
-                                    dest: peer.clone(),
-                                    offer,
-                                }))
-                                .await
-                                .ok();
+                            let basket = fish_basket.lock();
+                            let offers_made = &offer_buffers.lock().offers_made;
+
+                            // First, calculate how many of each fish are tied up in other offers
+                            let mut offered_quantities: std::collections::HashMap<String, u32> =
+                                std::collections::HashMap::new();
+                            for existing_offer in offers_made.values() {
+                                for item in &existing_offer.offered {
+                                    *offered_quantities
+                                        .entry(item.fish_type.clone())
+                                        .or_insert(0) += item.quantity;
+                                }
+                            }
+
+                            let mut is_valid = true;
+                            // Now, validate the new offer against the available amount
+                            for item_to_offer in &offer.offered {
+                                let total_in_inventory = basket
+                                    .map()
+                                    .get(&item_to_offer.fish_type)
+                                    .copied()
+                                    .unwrap_or(0);
+                                let already_offered = offered_quantities
+                                    .get(&item_to_offer.fish_type)
+                                    .copied()
+                                    .unwrap_or(0);
+                                let available = total_in_inventory.saturating_sub(already_offered);
+
+                                if available < item_to_offer.quantity {
+                                    println!(
+                                        "* Você não tem peixes suficientes para a troca. (Disponível: {} {})",
+                                        available, item_to_offer.fish_type
+                                    );
+                                    is_valid = false;
+                                    break;
+                                }
+                            }
+                            if is_valid {
+                                sender
+                                    .send(Event::UIMessage(server::FNP::TradeOffer {
+                                        rem: my_peer.clone(),
+                                        dest: peer.clone(),
+                                        offer,
+                                    }))
+                                    .await
+                                    .ok();
+                            }
                         } else {
                             println!("* Argumentos de oferta inválidos.");
                         }
