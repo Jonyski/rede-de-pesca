@@ -1,133 +1,208 @@
 mod cli;
 mod fisher;
 
-pub use crate::server::protocol::Offer;
-use crate::server::protocol::OfferBuff;
-use async_dup::Mutex;
+use crate::PeerRegistry;
+use crate::server::protocol::{Offer, OfferBuff};
 pub use cli::Args;
 use std::sync::Arc;
 
-use async_channel::Sender;
-use std::net::SocketAddr;
-use std::str::FromStr;
-
 use crate::Event;
+pub use crate::inventory::FishBasket;
 use crate::server;
+use crate::server::Peer;
+use async_channel::Sender;
+use async_dup::Mutex;
 pub use fisher::FishCatalog;
 pub use fisher::fishing;
 use smol::Unblock;
-use smol::io::AsyncBufReadExt;
+use smol::io::{AsyncBufReadExt, BufReader};
 use smol::stream::StreamExt;
+use std::net::SocketAddr;
+use std::str::FromStr;
 
 /// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(
     sender: Sender<Event>,
-    my_addr: SocketAddr,
+    my_peer: Peer,
     offer_buffers: Arc<Mutex<OfferBuff>>,
+    peer_registry: PeerRegistry,
+    fish_basket: Arc<Mutex<FishBasket>>,
 ) {
     let stdin = Unblock::new(std::io::stdin());
-    let mut lines = smol::io::BufReader::new(stdin).lines();
+    let mut lines = BufReader::new(stdin).lines();
 
     while let Some(Ok(line)) = lines.next().await {
-        if !line.trim().is_empty() {
-            // executando comandos
-            if line.starts_with("$") {
-                if line == "$p" || line == "$pescar" {
-                    sender.send(Event::Pesca).await.ok();
+        // Ignorando mensagens vazias
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Executando comandos
+        if line.starts_with('$') {
+            let mut parts = line.split_whitespace().collect::<Vec<_>>();
+            // Pesca e listagem de Peers
+            if parts[0].to_lowercase() == "$p" || parts[0].to_lowercase() == "$pescar" {
+                sender.send(Event::Pesca).await.ok();
+                continue;
+            } else if parts[0].to_lowercase() == "$l" || parts[0].to_lowercase() == "$listar" {
+                println!("* Peers conectados:");
+                for peer in peer_registry.lock().values() {
+                    println!("- {} ({})", peer.username(), peer.address());
+                }
+                continue;
+            }
+            // Inspeção de inventário
+            if parts[0].to_lowercase() == "$i" || parts[0].to_lowercase() == "$inventario" {
+                if let Some(peer_name) = parts.get(1) {
+                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                        sender
+                            .send(Event::UIMessage(server::FNP::InventoryInspection {
+                                rem: my_peer.clone(),
+                                dest: peer.clone(),
+                            }))
+                            .await
+                            .ok();
+                    } else {
+                        println!("* Peer não encontrado.");
+                    }
                 } else {
-                    let parts = line.split_whitespace().collect::<Vec<_>>();
-                    if parts[0] == "$i" {
-                        if let Some(peer_addr) = parts.get(1) {
-                            if let Ok(socket) = peer_addr.parse() {
+                    // Se não há um peer como argumento, inspeciona o próprio inventário
+                    sender
+                        .send(Event::UIMessage(server::FNP::InventoryInspection {
+                            rem: my_peer.clone(),
+                            dest: my_peer.clone(),
+                        }))
+                        .await
+                        .ok();
+                }
+                continue;
+            }
+            // Oferta de troca de peixe
+            if parts[0].to_lowercase() == "$t" || parts[0].to_lowercase() == "$troca" {
+                // Uma troca tem que ter 5 partes
+                if parts.len() < 5 {
+                    println!(
+                        "* Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,..."
+                    );
+                    continue;
+                }
+
+                if let Some(peer_name) = parts.get(1) {
+                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                        if let Ok(offer) = Offer::from_str(&parts[2..].join(" ")) {
+                            let basket = fish_basket.lock();
+                            let offers_made = &offer_buffers.lock().offers_made;
+
+                            // First, calculate how many of each fish are tied up in other offers
+                            let mut offered_quantities: std::collections::HashMap<String, u32> =
+                                std::collections::HashMap::new();
+                            for existing_offer in offers_made.values() {
+                                for item in &existing_offer.offered {
+                                    *offered_quantities
+                                        .entry(item.fish_type.clone())
+                                        .or_insert(0) += item.quantity;
+                                }
+                            }
+
+                            let mut is_valid = true;
+                            // Now, validate the new offer against the available amount
+                            for item_to_offer in &offer.offered {
+                                let total_in_inventory = basket
+                                    .map()
+                                    .get(&item_to_offer.fish_type)
+                                    .copied()
+                                    .unwrap_or(0);
+                                let already_offered = offered_quantities
+                                    .get(&item_to_offer.fish_type)
+                                    .copied()
+                                    .unwrap_or(0);
+                                let available = total_in_inventory.saturating_sub(already_offered);
+
+                                if available < item_to_offer.quantity {
+                                    println!(
+                                        "* Você não tem peixes suficientes para a troca. (Disponível: {} {})",
+                                        available, item_to_offer.fish_type
+                                    );
+                                    is_valid = false;
+                                    break;
+                                }
+                            }
+                            if is_valid {
                                 sender
-                                    .send(Event::UIMessage(server::FNP::InventoryInspection {
-                                        rem: server::Peer::new(my_addr),
-                                        dest: server::Peer::new(socket),
+                                    .send(Event::UIMessage(server::FNP::TradeOffer {
+                                        rem: my_peer.clone(),
+                                        dest: peer.clone(),
+                                        offer,
                                     }))
                                     .await
                                     .ok();
-                            } else {
-                                println!("* Invalid peer.");
                             }
                         } else {
-                            sender
-                                .send(Event::UIMessage(server::FNP::InventoryInspection {
-                                    rem: server::Peer::new(my_addr),
-                                    dest: server::Peer::new(my_addr),
-                                }))
-                                .await
-                                .ok();
+                            println!("* Argumentos de oferta inválidos.");
                         }
-                    } else if parts[0] == "$t" {
-                        if let Some(peer_addr) = parts.get(1)
-                            && let Ok(socket) = peer_addr.parse()
-                            && let Ok(offer) = Offer::from_str(&parts[2..=4].join(" "))
-                        {
-                            sender
-                                .send(Event::UIMessage(server::FNP::TradeOffer {
-                                    rem: server::Peer::new(my_addr),
-                                    dest: server::Peer::new(socket),
-                                    offer,
-                                }))
-                                .await
-                                .ok();
-                        } else {
-                            println!("* Invalid arguments for trade offer...");
-                        }
-                    } else if parts[0] == "$c"
-                        && let Some(peer_addr) = parts.get(2)
-                        && let Ok(socket) = peer_addr.parse()
-                    {
-                        let offer = offer_buffers
-                            .lock()
-                            .offers_received
-                            .get(&socket)
-                            .unwrap()
-                            .clone();
-                        if parts[1] == "s" || parts[1] == "sim" {
-                            sender
-                                .send(Event::UIMessage(server::FNP::TradeConfirm {
-                                    rem: server::Peer::new(my_addr),
-                                    dest: server::Peer::new(socket),
-                                    response: true,
-                                    offer,
-                                }))
-                                .await
-                                .ok();
-                        } else if parts[1] == "n" || parts[1] == "nao" {
-                            sender
-                                .send(Event::UIMessage(server::FNP::TradeConfirm {
-                                    rem: server::Peer::new(my_addr),
-                                    dest: server::Peer::new(socket),
-                                    response: false,
-                                    offer,
-                                }))
-                                .await
-                                .ok();
-                        } else {
-                            println!("* Invalid offer response");
-                        }
+                    } else {
+                        println!("* Peer não encontrado.");
                     }
                 }
-            } else {
-                let msg = if line.starts_with("@")
-                    && let Some((peer_addr, text)) = line.split_once(" ")
-                    && let Some(strip_addr) = peer_addr.strip_prefix("@")
-                    && let Ok(addr) = strip_addr.parse()
-                {
+                continue;
+            }
+            // Confirmação de troca
+            if parts[0].to_lowercase() == "$c" || parts[0].to_lowercase() == "$confirmar" {
+                if let (Some(response), Some(peer_name)) = (parts.get(1), parts.get(2)) {
+                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                        if let Some(offer) =
+                            offer_buffers.lock().offers_received.get(&peer.address())
+                        {
+                            let response = *response == "s" || *response == "sim";
+                            sender
+                                .send(Event::UIMessage(server::FNP::TradeConfirm {
+                                    rem: my_peer.clone(),
+                                    dest: peer.clone(),
+                                    response,
+                                    offer: offer.clone(),
+                                }))
+                                .await
+                                .ok();
+                        } else {
+                            println!("* Nenhuma oferta encontrada para este peer.");
+                        }
+                    } else {
+                        println!("* Peer não encontrado.");
+                    }
+                } else {
+                    println!("* Argumentos inválidos para a confirmação de troca.");
+                }
+                continue;
+            }
+            // Se chegou aqui, o comando ${input} não existe
+            println!("* Este comando não existe");
+            continue;
+        }
+        // Mensagens normais (DMs e broadcasts)
+        let msg = if line.starts_with('@') {
+            if let Some((peer_name, text)) = line.split_once(' ') {
+                let peer_name = peer_name.strip_prefix('@').unwrap_or(peer_name);
+                if let Some(peer) = peer_registry.lock().get(peer_name) {
                     server::FNP::Message {
-                        rem: server::Peer::new(my_addr),
-                        dest: server::Peer::new(addr),
+                        rem: my_peer.clone(),
+                        dest: peer.clone(),
                         content: text.to_string(),
                     }
                 } else {
-                    server::FNP::Broadcast {
-                        rem: server::protocol::Peer::new(my_addr),
-                        content: line,
-                    }
-                };
-                sender.send(Event::UIMessage(msg)).await.ok();
+                    println!("* Peer não encontrado.");
+                    continue;
+                }
+            } else {
+                println!("* Formato de mensagem inválido. Use @username <message>");
+                continue;
             }
-        }
+        } else {
+            server::FNP::Broadcast {
+                rem: my_peer.clone(),
+                content: line,
+            }
+        };
+        // Enviando a mensagem para o servidor
+        sender.send(Event::UIMessage(msg)).await.ok();
     }
 }
