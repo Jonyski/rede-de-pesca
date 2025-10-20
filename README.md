@@ -7,11 +7,11 @@ Este é um projeto feito para a matéria de Redes de Computadores
 
 - [x] Envio de todos os tipos de mensagens pela rede (server/mod.rs)
 - [x] Tratar a chegada de todos os tipos de mensagens (lib.rs)
-- [ ] Implementar sistema de nomes de usuário
+- [x] Implementar sistema de nomes de usuário
 - [x] Criar invetario global de peixeis
 - [x] Implementar sistema de trocas
 - [ ] Implementar uma interface de terminal (tui/mod.rs)
-- [ ] Implementar todos os comandos da interface ($i, $t, etc) (tui/mod.rs)
+- [x] Implementar todos os comandos da interface ($i, $t, etc) (tui/mod.rs)
 
 ## Mecânicas
 
@@ -23,6 +23,8 @@ Os usuários da Rede de Pesca podem:
 
 ## Tipos de mensagem
 
+- Lista de peers
+- Anúncio de nome
 - Envio de mensagem 1:1
 - Inspecionar peixes
 - Inventário
@@ -64,13 +66,17 @@ Texto: "pessoa tal achou um peixe raro";
 
 Tipo: Pedido de Troca;
 
-Proposta: tupiniqui|12 > lambari|1;
+Proposta: atum|12,piranha|3 > peixe-espada|5;
 
 -----------------------------
 
 Tipo: Confirma Troca;
 
-Proposta: Sim/Não;
+Resposta: true/false;
+
+Proposta: atum|12,piranha|3 > peixe-espada|5;
+
+-----------------------------
 
 ## Comandos
 
@@ -78,12 +84,14 @@ Proposta: Sim/Não;
 
 -> @joao aaaaaaaaa
 
--> :[p]escar
+-> $[p]escar
 
--> :[i]nventario
+-> $[i]nventario
 
--> :[i]nventario @jao
+-> $[i]nventario @jao
 
--> :[t]roca @pedrinho n peixe > m peixe2
+-> $[t]roca jao peixe|x,peixe2|y > peixe3|z
 
--> :[c]onfirmar [s]im/[n]ao
+-> $[c]onfirmar [s]im/[n]ao nome
+
+-> $[l]istar
