@@ -46,6 +46,13 @@ impl Server {
         &self.host_peer
     }
 
+    pub fn addr_connected_peer(&self) -> Vec<SocketAddr> {
+        let streams = self.streams.lock();
+        streams.iter()
+               .filter_map(|stream| stream.get_ref().peer_addr().ok())
+               .collect()
+    }
+
     pub async fn connect_to_many(&self, addrs: &[SocketAddr], sender: Sender<Event>) {
         for peer_addr in addrs {
             if let Ok(stream) = Async::<TcpStream>::connect(*peer_addr).await {

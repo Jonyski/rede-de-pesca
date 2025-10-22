@@ -163,18 +163,23 @@ pub async fn dispatch(
                 }
                 server::FNP::PeerList { peers, .. } => { 
                     let mut to_connect: Vec<SocketAddr> = Vec::new();
+                    let cur_connected = server.addr_connected_peer();
+                    let my_addr = host_peer.address();
                     {
                         let mut registry = peer_registry.lock();
                         for peer in peers {
-                            if !registry.contains_key(peer.username()) {
+                            if let std::collections::hash_map::Entry::Vacant(e) = registry.entry(peer.username().to_string()) {
                                 println!(
                                     "* Adicionando {} ({}) à lista de peers.",
                                     peer.username(),
                                     peer.address()
                                 );
-                                registry.insert(peer.username().to_string(), peer.clone());
+                                e.insert(peer.clone());
 
-                                if peer.username() != host_peer.username() {
+                                let peer_addr = peer.address();
+                                if peer.username() != host_peer.username() 
+                                    && my_addr < peer_addr
+                                    && !cur_connected.contains(&peer_addr) {
                                     to_connect.push(peer.address());
                                 }
                             }
