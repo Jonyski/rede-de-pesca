@@ -163,8 +163,6 @@ pub async fn dispatch(
                 }
                 server::FNP::PeerList { peers, .. } => { 
                     let mut to_connect: Vec<SocketAddr> = Vec::new();
-                    let cur_connected = server.addr_connected_peer();
-                    let my_addr = host_peer.address();
                     {
                         let mut registry = peer_registry.lock();
                         for peer in peers {
@@ -177,9 +175,7 @@ pub async fn dispatch(
                                 e.insert(peer.clone());
 
                                 let peer_addr = peer.address();
-                                if peer.username() != host_peer.username() 
-                                    && my_addr < peer_addr
-                                    && !cur_connected.contains(&peer_addr) {
+                                if peer.username() != host_peer.username() {
                                     to_connect.push(peer.address());
                                 }
                             }

@@ -46,16 +46,25 @@ impl Server {
         &self.host_peer
     }
 
-    pub fn addr_connected_peer(&self) -> Vec<SocketAddr> {
-        let streams = self.streams.lock();
-        streams.iter()
-               .filter_map(|stream| stream.get_ref().peer_addr().ok())
-               .collect()
-    }
-
     pub async fn connect_to_many(&self, addrs: &[SocketAddr], sender: Sender<Event>) {
         for peer_addr in addrs {
-            if let Ok(stream) = Async::<TcpStream>::connect(*peer_addr).await {
+            let to_connect = *peer_addr;
+
+            let connected = {
+                let streams = self.streams.lock();
+                streams.iter().any(|stream| {
+                    stream
+                        .get_ref()
+                        .peer_addr()
+                        .map_or(false, |addr| addr == to_connect)
+                })
+            };
+            if connected {
+                continue;
+            }
+
+            if let Ok(stream) = Async::<TcpStream>::connect(to_connect).await {
+                println!("* Conexão estabelecida com {}", to_connect);
                 let stream_arc = Arc::new(stream);
                 self.streams.lock().push(stream_arc.clone());
 
@@ -71,6 +80,8 @@ impl Server {
                     Self::read_messages_from(stream_arc, sender).await.ok();
                 })
                 .detach();
+            } else {
+                eprintln!("* Falha ao conectar com o peer em {}", to_connect);
             }
         }
     }
@@ -78,6 +89,19 @@ impl Server {
     pub async fn listen(&self, sender: Sender<Event>) -> smol::io::Result<()> {
         loop {
             let (stream, _addr) = self.listener.accept().await?;
+
+            let connected = {
+                let streams = self.streams.lock();
+                streams.iter().any(|s| {
+                    s.get_ref()
+                        .peer_addr()
+                        .map_or(false, |addr| addr == _addr)
+                })
+            };
+            if connected {
+                continue;
+            }
+
             let peer = Arc::new(stream);
             self.streams.lock().push(peer.clone());
 
