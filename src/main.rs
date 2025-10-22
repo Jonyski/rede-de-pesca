@@ -72,6 +72,7 @@ fn main() -> io::Result<()> {
 
         // Spawna a thread do dispatcher
         smol::spawn(fishnet::dispatch(
+            server.clone(),
             host_peer.clone(),
             ssender,
             fish_catalog.clone(),

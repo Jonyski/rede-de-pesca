@@ -29,6 +29,7 @@ pub enum Event {
 
 /// Recebe todos os tipos de Eventos e realiza a ação/efeito colateral de cada um
 pub async fn dispatch(
+    server: Arc<server::Server>,
     host_peer: Peer,
     server_sender: Sender<FNP>,
     fish_catalog: Arc<tui::FishCatalog>,
@@ -46,19 +47,30 @@ pub async fn dispatch(
             }
             Event::ServerMessage(fnp) => match fnp {
                 server::FNP::AnnounceName { rem } => {
-                    // Anúncio de nome e conexão, atualiza o registro de peers
-                    let mut registry = peer_registry.lock();
-                    if !registry.contains_key(rem.username()) {
-                        println!("* {} ({}) se conectou.", rem.username(), rem.address());
-                        registry.insert(rem.username().to_string(), rem.clone());
-
-                        let peers = registry.values().cloned().collect();
-                        let peer_list_msg = FNP::PeerList {
-                            rem: host_peer.clone(),
-                            dest: rem,
-                            peers,
-                        };
-                        server_sender.send(peer_list_msg).await.ok();
+                    let mut all_peers: Vec<Peer> = Vec::new();
+                    let mut new_added = false;
+                    
+                    { // Anúncio de nome e conexão, atualiza o registro de peers
+                        let mut registry = peer_registry.lock();
+                        if !registry.contains_key(rem.username()) {
+                            println!("* {} ({}) se conectou.", rem.username(), rem.address());
+                            registry.insert(rem.username().to_string(), rem.clone());
+                            all_peers = registry.values().cloned().collect();
+                            new_added = true;
+                        }
+                    }
+                    if new_added {
+                        for peer_in_list in &all_peers {
+                            if peer_in_list.username() == host_peer.username() {
+                                continue;
+                            }           
+                            let peer_list_msg = FNP::PeerList {
+                                rem: host_peer.clone(),
+                                dest: peer_in_list.clone(),
+                                peers: all_peers.clone(),
+                            };
+                            server_sender.send(peer_list_msg).await.ok();
+                        }
                     }
                 }
                 server::FNP::Message { rem, content, .. } => {
@@ -169,6 +181,7 @@ pub async fn dispatch(
                                 peer.address()
                             );
                             registry.insert(peer.username().to_string(), peer);
+
                         }
                     }
                 }

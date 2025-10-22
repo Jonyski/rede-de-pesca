@@ -102,7 +102,9 @@ impl Server {
     ) -> smol::io::Result<()> {
         while let Ok(msg) = receiver.recv().await {
             match &msg {
-                FNP::Broadcast { .. } | FNP::AnnounceName { .. } => {
+                FNP::Broadcast { .. } 
+                | FNP::AnnounceName { .. }
+                | FNP::PeerList { .. } => {
                     for stream in self.streams.lock().iter() {
                         let msg = msg.clone().set_rem(self.host_peer.clone());
                         let network_msg = format!("{}\n", msg);
@@ -117,8 +119,7 @@ impl Server {
                 | FNP::TradeOffer { dest, .. }
                 | FNP::InventoryInspection { dest, .. }
                 | FNP::InventoryShowcase { dest, .. }
-                | FNP::TradeConfirm { dest, .. }
-                | FNP::PeerList { dest, .. } => {
+                | FNP::TradeConfirm { dest, .. } => {
                     let msg = msg.clone().set_rem(self.host_peer.clone());
                     let network_msg = format!("{}\n", msg);
                     let dest_addr = dest.address();
