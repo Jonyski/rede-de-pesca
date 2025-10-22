@@ -175,7 +175,9 @@ pub async fn dispatch(
                                 e.insert(peer.clone());
 
                                 let peer_addr = peer.address();
+
                                 if peer.username() != host_peer.username() && peer.username() != rem.username() && peer_addr < host_peer.address() {
+
                                     to_connect.push(peer.address());
                                 }
                             }
