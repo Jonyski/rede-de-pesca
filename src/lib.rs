@@ -161,7 +161,7 @@ pub async fn dispatch(
                     }
                     offer_buffers.lock().offers_made.remove(&rem.address());
                 }
-                server::FNP::PeerList { peers, .. } => { 
+                server::FNP::PeerList { peers, rem, .. } => { 
                     let mut to_connect: Vec<SocketAddr> = Vec::new();
                     {
                         let mut registry = peer_registry.lock();
@@ -175,7 +175,7 @@ pub async fn dispatch(
                                 e.insert(peer.clone());
 
                                 let peer_addr = peer.address();
-                                if peer.username() != host_peer.username() && peer_addr < host_peer.address() {
+                                if peer.username() != host_peer.username() && peer.username() != rem.username() && peer_addr < host_peer.address() {
                                     to_connect.push(peer.address());
                                 }
                             }
