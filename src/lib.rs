@@ -1,13 +1,12 @@
 // src/lib.rs
 
 #![allow(unused)]
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-
-use async_channel::{Receiver, Sender};
-use async_dup::Mutex;
-
 pub use crate::inventory::FishBasket;
 use crate::server::{FNP, Peer, protocol::OfferBuff};
+use crate::tui::{err, log};
+use async_channel::{Receiver, Sender};
+use async_dup::Mutex;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 pub mod inventory;
 pub mod server;
@@ -43,7 +42,11 @@ pub async fn dispatch(
         match event {
             Event::PeerDisconnected(peer) => {
                 if peer_registry.lock().remove(peer.username()).is_some() {
-                    println!("* {} ({}) saiu da rede.", peer.username(), peer.address());
+                    log(format!(
+                        "{} ({}) saiu da rede.",
+                        peer.username(),
+                        peer.address()
+                    ));
                 }
             }
             Event::ServerMessage(fnp) => match fnp {
@@ -51,7 +54,11 @@ pub async fn dispatch(
                     // Anúncio de nome e conexão, atualiza o registro de peers
                     let mut registry = peer_registry.lock();
                     if !registry.contains_key(rem.username()) {
-                        println!("* {} ({}) se conectou.", rem.username(), rem.address());
+                        log(format!(
+                            "{} ({}) se conectou.",
+                            rem.username(),
+                            rem.address()
+                        ));
                         registry.insert(rem.username().to_string(), rem.clone());
 
                         let peers = registry.values().cloned().collect();
@@ -87,14 +94,14 @@ pub async fn dispatch(
                     server_sender.send(fnp).await.ok();
                 }
                 server::FNP::InventoryShowcase { rem, inventory, .. } => {
-                    println!("* Inventário de {}", rem.username());
+                    println!("-- INVENTÁRIO DE {} --", rem.username().to_uppercase());
                     if inventory.items.is_empty() {
-                        println!("[Inventário vazio]");
+                        log("[Nenhum peixe aqui]".to_string());
                     } else {
                         // Style the inventory for display
                         for item in &inventory.items {
                             let style = fish_catalog.get_style_for_fish(&item.fish_type);
-                            println!("  - {} {}(s)", item.quantity, style.style(&item.fish_type));
+                            println!("> [{}] {}", item.quantity, style.style(&item.fish_type));
                         }
                     }
                 }
@@ -106,20 +113,20 @@ pub async fn dispatch(
                         .insert(rem.address(), offer.clone());
                     // Exibindo os peixes ofertados e requisitados pelo remetente
                     println!("{} quer realizar a seguinte troca:", rem.username());
-                    offer
-                        .offered
-                        .into_iter()
-                        .for_each(|f| println!("- {} {}(s)", f.quantity, f.fish_type));
+                    offer.offered.into_iter().for_each(|f| {
+                        let style = fish_catalog.get_style_for_fish(&f.fish_type);
+                        println!("> {} {}(s)", f.quantity, style.style(&f.fish_type));
+                    });
                     println!("por");
-                    offer
-                        .requested
-                        .into_iter()
-                        .for_each(|f| println!("- {} {}(s)", f.quantity, f.fish_type));
-                    println!(
-                        "digite '$c [s]im {}' para aceitar, ou '$c [n]ao {}' para recusar",
+                    offer.requested.into_iter().for_each(|f| {
+                        let style = fish_catalog.get_style_for_fish(&f.fish_type);
+                        println!("> {} {}(s)", f.quantity, style.style(&f.fish_type))
+                    });
+                    log(format!(
+                        "Digite '$c [s]im {}' para aceitar, ou '$c [n]ao {}' para recusar",
                         rem.username(),
                         rem.username()
-                    );
+                    ));
                 }
                 server::FNP::TradeConfirm {
                     rem,
@@ -128,16 +135,12 @@ pub async fn dispatch(
                     offer,
                 } => {
                     if response {
-                        println!("* {} aceitou sua oferta de troca :)", rem.username());
+                        log(format!("{} aceitou sua oferta de troca :)", rem.username()));
                         let mut inventory = fish_basket.lock();
                         // Removendo os peixes que você deu
                         for item in offer.offered {
                             let style = fish_catalog.get_style_for_fish(&item.fish_type);
-                            println!(
-                                "* Você perdeu {} {}(s)",
-                                item.quantity,
-                                style.style(&item.fish_type)
-                            );
+                            println!("- {} {}(s)", item.quantity, style.style(&item.fish_type));
                             if let Some(count) = inventory.map_mut().get_mut(&item.fish_type) {
                                 *count -= item.quantity;
                                 if *count == 0 {
@@ -148,16 +151,12 @@ pub async fn dispatch(
                         // Adicionando os peixes que você recebeu
                         for item in offer.requested {
                             let style = fish_catalog.get_style_for_fish(&item.fish_type);
-                            println!(
-                                "* Você ganhou {} {}(s)",
-                                item.quantity,
-                                style.style(&item.fish_type)
-                            );
+                            println!("+ {} {}(s)", item.quantity, style.style(&item.fish_type));
                             *inventory.map_mut().entry(item.fish_type).or_insert(0) +=
                                 item.quantity;
                         }
                     } else {
-                        println!("* {} recusou sua oferta de troca :(", rem.username());
+                        log(format!("{} recusou sua oferta de troca :(", rem.username()));
                     }
                     offer_buffers.lock().offers_made.remove(&rem.address());
                 }
@@ -167,11 +166,11 @@ pub async fn dispatch(
                         let mut registry = peer_registry.lock();
                         for peer in peers {
                             if let std::collections::hash_map::Entry::Vacant(e) = registry.entry(peer.username().to_string()) {
-                                println!(
-                                    "* Adicionando {} ({}) à lista de peers.",
+                                log(format!(
+                                    "Adicionando {} ({}) à lista de peers.",
                                     peer.username(),
                                     peer.address()
-                                );
+                                ));
                                 e.insert(peer.clone());
 
                                 let peer_addr = peer.address();
@@ -198,17 +197,17 @@ pub async fn dispatch(
                 {
                     if let FNP::InventoryInspection { .. } = fnp {
                         let inventory = fish_basket.lock();
+                        println!("-- INVENTÁRIO --");
                         if inventory.map().is_empty() {
-                            println!("* Seu inventário está vazio.");
+                            log("[Nenhum peixe aqui, digite $[p]esca para pescar]".to_string());
                         } else {
-                            println!("* Seu inventário:");
                             for (fish_type, quantity) in inventory.map().iter() {
                                 let style = fish_catalog.get_style_for_fish(fish_type);
-                                println!("- {} {}(s)", quantity, style.style(fish_type));
+                                println!("> [{}] {}", quantity, style.style(fish_type));
                             }
                         }
                     } else {
-                        println!("* Essa operação não é válida para você mesmo.");
+                        err("Este comando não é válido para você mesmo".to_string());
                     }
                     continue;
                 }
@@ -231,10 +230,10 @@ pub async fn dispatch(
                                     let available =
                                         inventory.map().get(&item.fish_type).copied().unwrap_or(0);
                                     if available < item.quantity {
-                                        println!(
-                                            "* Troca inválida! Você não tem mais {} {}(s).",
+                                        err(format!(
+                                            "Troca inválida! Você não tem {} {}(s) para trocar.",
                                             item.quantity, item.fish_type
-                                        );
+                                        ));
                                         is_valid = false;
                                         break;
                                     }
@@ -244,12 +243,12 @@ pub async fn dispatch(
                                 if !is_valid {
                                     continue;
                                 } else {
-                                    println!("-- OFERTA ACEITA --");
+                                    log("-- OFERTA ACEITA --".to_string());
                                     for item in &offer.offered {
                                         let style =
                                             fish_catalog.get_style_for_fish(&item.fish_type);
                                         println!(
-                                            "* Você ganhou {} {}(s)",
+                                            "+ {} {}(s)",
                                             item.quantity,
                                             style.style(&item.fish_type)
                                         );
@@ -262,7 +261,7 @@ pub async fn dispatch(
                                         let style =
                                             fish_catalog.get_style_for_fish(&item.fish_type);
                                         println!(
-                                            "* Você perdeu {} {}(s)",
+                                            "- {} {}(s)",
                                             item.quantity,
                                             style.style(&item.fish_type)
                                         );
@@ -278,12 +277,12 @@ pub async fn dispatch(
                                 }
                             }
                         } else {
-                            println!("-- OFERTA RECUSADA --");
+                            log("-- OFERTA RECUSADA --".to_string());
                         }
                         offer_buffers.lock().offers_received.remove(&dest.address());
                     }
                     FNP::TradeOffer { dest, offer, .. } => {
-                        println!("-- OFERTA FEITA --");
+                        log("-- OFERTA FEITA --".to_string());
                         offer_buffers
                             .lock()
                             .offers_made

@@ -1,24 +1,24 @@
 mod cli;
 mod fisher;
 
-use crate::PeerRegistry;
-use crate::server::protocol::{Offer, OfferBuff};
-pub use cli::Args;
-use std::sync::Arc;
-
 use crate::Event;
+use crate::PeerRegistry;
 pub use crate::inventory::FishBasket;
 use crate::server;
 use crate::server::Peer;
+use crate::server::protocol::{Offer, OfferBuff};
 use async_channel::Sender;
 use async_dup::Mutex;
+pub use cli::Args;
 pub use fisher::FishCatalog;
 pub use fisher::fishing;
+use owo_colors::{Style, Styled};
 use smol::Unblock;
 use smol::io::{AsyncBufReadExt, BufReader};
 use smol::stream::StreamExt;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(
@@ -45,9 +45,9 @@ pub async fn eval(
                 sender.send(Event::Pesca).await.ok();
                 continue;
             } else if parts[0].to_lowercase() == "$l" || parts[0].to_lowercase() == "$listar" {
-                println!("* Peers conectados:");
+                log("-- PESCADORES ONLINE --".to_string());
                 for peer in peer_registry.lock().values() {
-                    println!("- {} ({})", peer.username(), peer.address());
+                    log(format!("> {} ({})", peer.username(), peer.address()));
                 }
                 continue;
             }
@@ -63,7 +63,7 @@ pub async fn eval(
                             .await
                             .ok();
                     } else {
-                        println!("* Peer não encontrado.");
+                        err("Peer não encontrado.".to_string());
                     }
                 } else {
                     // Se não há um peer como argumento, inspeciona o próprio inventário
@@ -81,8 +81,8 @@ pub async fn eval(
             if parts[0].to_lowercase() == "$t" || parts[0].to_lowercase() == "$troca" {
                 // Uma troca tem que ter 5 partes
                 if parts.len() < 5 {
-                    println!(
-                        "* Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,..."
+                    err(
+                        "Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,...".to_string()
                     );
                     continue;
                 }
@@ -119,10 +119,10 @@ pub async fn eval(
                                 let available = total_in_inventory.saturating_sub(already_offered);
 
                                 if available < item_to_offer.quantity {
-                                    println!(
-                                        "* Você não tem peixes suficientes para a troca. (Disponível: {} {})",
+                                    err(format!(
+                                        "Você não tem peixes suficientes para a troca. (Disponível: {} {})",
                                         available, item_to_offer.fish_type
-                                    );
+                                    ));
                                     is_valid = false;
                                     break;
                                 }
@@ -138,10 +138,10 @@ pub async fn eval(
                                     .ok();
                             }
                         } else {
-                            println!("* Argumentos de oferta inválidos.");
+                            err("Argumentos de oferta inválidos.".to_string());
                         }
                     } else {
-                        println!("* Peer não encontrado.");
+                        err("Peer não encontrado.".to_string());
                     }
                 }
                 continue;
@@ -164,18 +164,18 @@ pub async fn eval(
                                 .await
                                 .ok();
                         } else {
-                            println!("* Nenhuma oferta encontrada para este peer.");
+                            err("Nenhuma oferta encontrada para este peer.".to_string());
                         }
                     } else {
-                        println!("* Peer não encontrado.");
+                        err("Peer não encontrado.".to_string());
                     }
                 } else {
-                    println!("* Argumentos inválidos para a confirmação de troca.");
+                    err("Argumentos inválidos para a confirmação de troca.".to_string());
                 }
                 continue;
             }
             // Se chegou aqui, o comando ${input} não existe
-            println!("* Este comando não existe");
+            err("Este comando não existe".to_string());
             continue;
         }
         // Mensagens normais (DMs e broadcasts)
@@ -189,11 +189,11 @@ pub async fn eval(
                         content: text.to_string(),
                     }
                 } else {
-                    println!("* Peer não encontrado.");
+                    err("Peer não encontrado.".to_string());
                     continue;
                 }
             } else {
-                println!("* Formato de mensagem inválido. Use @username <message>");
+                err("Formato de mensagem inválido. Use @username <message>".to_string());
                 continue;
             }
         } else {
@@ -205,4 +205,28 @@ pub async fn eval(
         // Enviando a mensagem para o servidor
         sender.send(Event::UIMessage(msg)).await.ok();
     }
+}
+
+pub fn log(msg: String) {
+    println!("{}", style_log_msg(msg));
+}
+
+pub fn err(err_msg: String) {
+    println!("{}", style_err_msg(err_msg));
+}
+
+pub fn style_log_msg(msg: String) -> String {
+    Style::new()
+        .fg_rgb::<170, 190, 205>()
+        .italic()
+        .style(msg)
+        .to_string()
+}
+
+pub fn style_err_msg(err_msg: String) -> String {
+    Style::new()
+        .fg_rgb::<220, 40, 80>()
+        .italic()
+        .style(err_msg)
+        .to_string()
 }
