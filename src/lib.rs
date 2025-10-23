@@ -28,6 +28,8 @@ pub enum Event {
 
 /// Recebe todos os tipos de Eventos e realiza a ação/efeito colateral de cada um
 pub async fn dispatch(
+    server: Arc<crate::server::Server>,
+    esender: Sender<Event>,
     host_peer: Peer,
     server_sender: Sender<FNP>,
     fish_catalog: Arc<tui::FishCatalog>,
@@ -158,19 +160,34 @@ pub async fn dispatch(
                     }
                     offer_buffers.lock().offers_made.remove(&rem.address());
                 }
-                server::FNP::PeerList { peers, .. } => {
-                    let mut registry = peer_registry.lock();
-                    for peer in peers {
-                        if !registry.contains_key(peer.username()) {
-                            log(format!(
-                                "Adicionando {} ({}) à lista de peers.",
-                                peer.username(),
-                                peer.address()
-                            ));
-                            registry.insert(peer.username().to_string(), peer);
+                server::FNP::PeerList { peers, rem, .. } => { 
+                    let mut to_connect: Vec<SocketAddr> = Vec::new();
+                    {
+                        let mut registry = peer_registry.lock();
+                        for peer in peers {
+                            if let std::collections::hash_map::Entry::Vacant(e) = registry.entry(peer.username().to_string()) {
+                                log(format!(
+                                    "Adicionando {} ({}) à lista de peers.",
+                                    peer.username(),
+                                    peer.address()
+                                ));
+                                e.insert(peer.clone());
+
+                                let peer_addr = peer.address();
+
+                                if peer.username() != host_peer.username() && peer.username() != rem.username() && peer_addr < host_peer.address() {
+
+                                    to_connect.push(peer.address());
+                                }
+                            }
                         }
                     }
-                }
+
+                    if !to_connect.is_empty() {
+                        println!("* Conectando aos novos peers...");
+                        server.connect_to_many(&to_connect, esender.clone()).await;
+                    }
+               }
             },
             Event::UIMessage(fnp) => {
                 // Lida com mensagens eviadas do cliente para ele mesmo
