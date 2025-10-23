@@ -13,8 +13,8 @@ pub struct Args {
     #[arg(short, long, value_delimiter = ',', value_parser = parse_addr)]
     peers: Vec<SocketAddr>,
     /// Endereço onde se deseja bindar o peer sendo instanciado
-    #[arg(short, long, value_parser = parse_addr)]
-    bind: SocketAddr,
+    #[arg(short, long, value_parser = parse_addr, required_unless_present = "first")]
+    bind: Option<SocketAddr>,
 }
 
 impl Args {
@@ -27,7 +27,7 @@ impl Args {
     }
 
     pub fn bind(&self) -> SocketAddr {
-        self.bind
+        self.bind.unwrap()
     }
 }
 
@@ -35,5 +35,3 @@ impl Args {
 fn parse_addr(s: &str) -> Result<SocketAddr, String> {
     s.parse().map_err(|e| format!("Invalid bind/peer address: {}", e))
 }
-
-
