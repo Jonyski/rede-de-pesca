@@ -17,6 +17,7 @@ use smol::Unblock;
 use smol::io::{AsyncBufReadExt, BufReader};
 use smol::stream::StreamExt;
 use std::net::SocketAddr;
+use std::process::exit;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -45,9 +46,9 @@ pub async fn eval(
                 sender.send(Event::Pesca).await.ok();
                 continue;
             } else if parts[0].to_lowercase() == "$l" || parts[0].to_lowercase() == "$listar" {
-                log("-- PESCADORES ONLINE --".to_string());
+                log("-- PESCADORES ONLINE --");
                 for peer in peer_registry.lock().values() {
-                    log(format!("> {} ({})", peer.username(), peer.address()));
+                    log(&format!("> {} ({})", peer.username(), peer.address()));
                 }
                 continue;
             }
@@ -63,7 +64,7 @@ pub async fn eval(
                             .await
                             .ok();
                     } else {
-                        err("Peer não encontrado.".to_string());
+                        err("Peer não encontrado.");
                     }
                 } else {
                     // Se não há um peer como argumento, inspeciona o próprio inventário
@@ -82,7 +83,7 @@ pub async fn eval(
                 // Uma troca tem que ter 5 partes
                 if parts.len() < 5 {
                     err(
-                        "Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,...".to_string()
+                        "Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,..."
                     );
                     continue;
                 }
@@ -119,7 +120,7 @@ pub async fn eval(
                                 let available = total_in_inventory.saturating_sub(already_offered);
 
                                 if available < item_to_offer.quantity {
-                                    err(format!(
+                                    err(&format!(
                                         "Você não tem peixes suficientes para a troca. (Disponível: {} {})",
                                         available, item_to_offer.fish_type
                                     ));
@@ -138,10 +139,10 @@ pub async fn eval(
                                     .ok();
                             }
                         } else {
-                            err("Argumentos de oferta inválidos.".to_string());
+                            err("Argumentos de oferta inválidos.");
                         }
                     } else {
-                        err("Peer não encontrado.".to_string());
+                        err("Peer não encontrado.");
                     }
                 }
                 continue;
@@ -164,19 +165,40 @@ pub async fn eval(
                                 .await
                                 .ok();
                         } else {
-                            err("Nenhuma oferta encontrada para este peer.".to_string());
+                            err("Nenhuma oferta encontrada para este peer.");
                         }
                     } else {
-                        err("Peer não encontrado.".to_string());
+                        err("Peer não encontrado.");
                     }
                 } else {
-                    err("Argumentos inválidos para a confirmação de troca.".to_string());
+                    err("Argumentos inválidos para a confirmação de troca.");
                 }
                 continue;
             }
+
+            if parts[0].to_lowercase() == "$q" || parts[0].to_lowercase() == "$quit" {
+                log("Quitting fishnet, wait a minute...");
+                exit(0);
+            }
+
+            if parts[0].to_lowercase() == "$h" || parts[0].to_lowercase() == "$help" {
+                log("fishnet 1.0.0");
+                log("Options:");
+                log("\t anything - Broadcast de mensagens para todos os peers conectados.");
+                log("\t @peer - Envia uma mensagem direta para um dado peer.");
+                log("\t $[l]istar - Lista todos os peers conectados a você.");
+                log("\t $[p]escar - Pesca um peixe aleatorio.");
+                log("\t $[i]nventario <peer> - Mostra o inventário do jogador, pode opcionalmente mostrar o inventário de um peer.");
+                log("\t $[t]roca (peixe|quatidade,... > peixe|quantidade,...) <peer> - Envia uma oferta de troca para um peer.");
+                log("\t $[c]onfirmar <s|n> - Pedido de confirmação de troca" );
+                log("\t $[q]uit - Encerra o programa.");
+                log("\t $[h]elp - Mostra essa mensagem de ajuda.");
+                continue;
+            }
             // Se chegou aqui, o comando ${input} não existe
-            err("Este comando não existe".to_string());
+            err("Este comando não existe");
             continue;
+            
         }
         // Mensagens normais (DMs e broadcasts)
         let msg = if line.starts_with('@') {
@@ -189,11 +211,11 @@ pub async fn eval(
                         content: text.to_string(),
                     }
                 } else {
-                    err("Peer não encontrado.".to_string());
+                    err("Peer não encontrado.");
                     continue;
                 }
             } else {
-                err("Formato de mensagem inválido. Use @username <message>".to_string());
+                err("Formato de mensagem inválido. Use @username <message>");
                 continue;
             }
         } else {
@@ -207,15 +229,15 @@ pub async fn eval(
     }
 }
 
-pub fn log(msg: String) {
+pub fn log(msg: &str) {
     println!("{}", style_log_msg(msg));
 }
 
-pub fn err(err_msg: String) {
+pub fn err(err_msg: &str) {
     println!("{}", style_err_msg(err_msg));
 }
 
-pub fn style_log_msg(msg: String) -> String {
+pub fn style_log_msg(msg: &str) -> String {
     Style::new()
         .fg_rgb::<170, 190, 205>()
         .italic()
@@ -223,7 +245,7 @@ pub fn style_log_msg(msg: String) -> String {
         .to_string()
 }
 
-pub fn style_err_msg(err_msg: String) -> String {
+pub fn style_err_msg(err_msg: &str) -> String {
     Style::new()
         .fg_rgb::<220, 40, 80>()
         .italic()
