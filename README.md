@@ -10,7 +10,7 @@ Este é um projeto feito para a matéria de Redes de Computadores
 - [x] Implementar sistema de nomes de usuário
 - [x] Criar invetario global de peixeis
 - [x] Implementar sistema de trocas
-- [ ] Implementar uma interface de terminal (tui/mod.rs)
+- [x] Implementar uma interface de terminal (tui/mod.rs)
 - [x] Implementar todos os comandos da interface ($i, $t, etc) (tui/mod.rs)
 
 ## Mecânicas
