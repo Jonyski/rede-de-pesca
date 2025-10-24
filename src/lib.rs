@@ -24,8 +24,6 @@ pub struct AppState {
     pub basket: Mutex<FishBasket>,
     // Buffer de ofertas/trocas recebidas
     pub offer_buffers: Mutex<OfferBuff>,
-    // Registro dos peers conectados
-    pub peer_registry: Mutex<PeerRegistry>
 }
 
 impl AppState {
@@ -34,7 +32,6 @@ impl AppState {
             fish_catalog: FishCatalog::new(),
             basket: Mutex::new(FishBasket::new()),
             offer_buffers: Mutex::new(OfferBuff::default()),
-            peer_registry: Mutex::new(HashMap::new())
         }
     }
 }
@@ -50,12 +47,13 @@ pub async fn dispatch(
     while let Ok(event) = receiver.recv().await {
         match event {
             Event::PeerDisconnected(socket_addr) => {
-                handlers::handle_peer_disconnected(&app_state.clone(), socket_addr).await;
+                handlers::handle_peer_disconnected(&server.clone(), socket_addr).await;
             },
-            Event::ServerMessage(fnp) => {
+            Event::ServerMessage(fnp, socket_addr) => {
                 handlers::handle_server_message(&app_state.clone(),
                     fnp,
                     &server.clone(),
+                    socket_addr,
                     server_sender.clone(),
                     event_sender.clone()
                 ).await;

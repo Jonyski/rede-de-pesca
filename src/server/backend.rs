@@ -1,19 +1,18 @@
 use async_channel::{Receiver, Sender};
 use async_dup::Mutex;
-use smol::{io::{AsyncBufReadExt, AsyncWriteExt}, stream::StreamExt, Async};
-use std::{collections::HashMap, net::{self, TcpStream}, sync::Arc};
+use smol::Async;
+use std::{collections::HashMap, net::{self, SocketAddr, TcpStream}, sync::Arc};
 
-use crate::{server::{protocol::FNPParser, Peer, FNP}, Event};
-
-/// Representa uma conexão TCP entre dois peers
-struct Connection(Async<net::TcpStream>);
+use crate::{server::{peerstore::{Connection, PeerStore}, Peer, FNP}, Event};
 
 
 /// Servidor/Cliente da rede p2p
 pub struct ServerBackend {
     host: Peer,
     listener: Async<net::TcpListener>,
-    connections: Arc<Mutex<HashMap<net::SocketAddr, Arc<Connection>>>>
+    connections: Arc<Mutex<HashMap<net::SocketAddr, Arc<Connection>>>>,
+
+    peer_store: Arc<PeerStore>
 }
 
 impl ServerBackend {
@@ -21,7 +20,7 @@ impl ServerBackend {
     /// ser um endereço). Se uma lista de endereços for passada, o código se conecta com
     ///  o primeiro endereço bem sucedido.
     // NOTE: `impl Into<net::SocketAddr>` nos permite aceitar como parametro qualquer valor que
-    // possa ser transformado em um socke addr
+    // possa ser transformado em um socketaddr
     pub fn new(username: &str, addr: impl Into<net::SocketAddr>) -> smol::io::Result<Self> {
         let listener = Async::<net::TcpListener>::bind(addr)?;
         // guardamos o endereço de listener
@@ -32,6 +31,7 @@ impl ServerBackend {
             host: host_peer,
             listener,
             connections: Arc::new(Mutex::new(HashMap::new())),
+            peer_store: Arc::new(PeerStore::new())
         })
     }
 
@@ -72,18 +72,15 @@ impl ServerBackend {
             match msg {
                 // mensagens gerais
                 FNP::AnnounceName { .. } | FNP::Broadcast { .. } | FNP::PeerList { .. } => {
-                    for (_, conn) in self.connections.lock().iter() {
-                        let msg = msg.clone().set_rem(self.host.clone());
-                        conn.send_fnp(&msg).await.ok();
-                    }
+                    self.peer_store().broadcast(self.host(), msg).await;
                 }
                 // mensagens diretas
                 _ => {
-                    let conns = self.connections.lock();
-                    let dest_addr = msg.dest().unwrap().address();
-                    if let Some(conn) = conns.get(&dest_addr) {
-                        let msg = msg.set_rem(self.host.clone());
-                        conn.send_fnp(&msg).await.ok();
+                    let dest_addr = msg.dest()
+                        .expect("Protocolo gerado errado, mensages diretas devem ter um destinatário.")
+                        .address();
+                    if let Some(info) = self.peer_store().get_by_listener(&dest_addr).await {
+                        info.conn.send_fnp(&msg).await.ok();
                     } else {
                         crate::tui::err(&format!("* Peer {} não encontrado na sua rede.", dest_addr));
                     }
@@ -125,19 +122,10 @@ impl ServerBackend {
          stream: Async<TcpStream>,
          sender: Sender<Event>
      ) -> smol::io::Result<()> {
-         let mut conns = self.connections.lock();
-         if conns.contains_key(&addr) {
-             return Ok(());
-         }
-
-         println!("* Conexão estabelecida com {}", addr);
-
          let conn = Arc::new(Connection::new(stream));
-         conns.insert(addr, conn.clone());
+         self.connections.lock().insert(addr, conn.clone());
 
-         let announce_name = FNP::AnnounceName {
-             rem: self.host(),
-         };
+         let announce_name = FNP::AnnounceName {rem: self.host()};
          let conn_cl = &conn.clone();
          conn_cl.send_fnp(&announce_name).await.ok();
 
@@ -151,41 +139,26 @@ impl ServerBackend {
          Ok(())
      }
 
+    pub async fn register_peer(&self, peer: Peer, client_addr: SocketAddr) {
+         if let Some(conn) = self.connections.lock().get(&client_addr).cloned() {
+             self.peer_store.register(peer, client_addr, conn).await;
+         } else {
+             crate::tui::err(&format!("* Conexão perdida com {}", client_addr));
+         }
+     }
+
+     pub fn peer_store(&self) -> Arc<PeerStore> {
+         self.peer_store.clone()
+     }
+
+     pub fn connections(&self) -> Arc<Mutex<HashMap<net::SocketAddr, Arc<Connection>>>> {
+         self.connections.clone()
+     }
+
     /// Encerra o servidor fechando todas as conexões abertas.
     /// Faz isso apenas quando conexões está livre
     async fn _shutdown(&self) {
         // Limpa todas as conexões
         self.connections.lock().clear();
-    }
-}
-
-impl Connection {
-    pub fn new(stream: Async<TcpStream>) -> Self {
-        Self(stream)
-    }
-
-    pub fn stream(&self) -> &Async<TcpStream> {
-        &self.0
-    }
-
-    pub async fn send_fnp(&self, msg: &FNP) -> smol::io::Result<()> {
-        let s = format!("{}\n", msg);
-        let mut stream = self.stream();
-        stream.write_all(s.as_bytes()).await
-    }
-
-    pub async fn start_reader(
-        self: Arc<Self>,
-        sender: Sender<Event>,
-        // shutdown receiver
-    ) {
-        let mut lines = smol::io::BufReader::new(self.stream()).lines();
-        while let Some(Ok(line)) = lines.next().await {
-            if let Ok(msg) = FNPParser::parse(&line) {
-                sender.send(Event::ServerMessage(msg)).await.ok();
-            } else {
-                dbg!(line);
-            }
-        }
     }
 }

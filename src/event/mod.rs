@@ -16,7 +16,7 @@ pub enum Event {
     /// Foi percebido que um peer saiu da rede
     PeerDisconnected(SocketAddr),
     /// Mensagem FNP chegando de um peer
-    ServerMessage(server::FNP),
+    ServerMessage(server::FNP, SocketAddr),
     /// Mensagem FNP chegando do próprio peer para ser enviada a outro(s)
     UIMessage(server::FNP),
     /// O peer está tentando pescar

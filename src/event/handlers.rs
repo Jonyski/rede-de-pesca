@@ -3,25 +3,19 @@
  * Todo handler segue o padrõa `handler_{evento}`
  */
 
-use std::net;
+use std::net::{self, SocketAddr};
 use async_channel::Sender;
 use crate::{server::{self, protocol::Offer, Inventory, Peer, ServerBackend, FNP}, AppState, Event};
 
 /// Handler para quando um peer se disconecta.
 /// Remove da lista de peers conhecidos e anuncia ao usuário
-pub async fn handle_peer_disconnected(_app_state: &AppState, peer: net::SocketAddr) {
-    // TODO: receber um peer e não um socket
-    // if app_state.peer_registry.lock().0.remove(peer.username()).is_some() {
-    //     crate::tui::log(&format!(
-    //         "{} ({}) saiu da rede.",
-    //         peer.username(),
-    //         peer.address()
-    //     ));
-    // }
-    crate::tui::log(&format!(
-        "({}) saiu da rede.",
-        peer
-    ));
+pub async fn handle_peer_disconnected(server: &ServerBackend, client_addr: net::SocketAddr) {
+    if let Some(peer_info) = server.peer_store().unregister_by_client(&client_addr).await {
+        let peer = peer_info.peer;
+        crate::tui::log(&format!( "{} ({}) saiu da rede.", peer.username(), peer.address()));
+    } else {
+        crate::tui::err(&format!("Peer desconhecido se desconectou: {}", client_addr));
+    }
 }
 
 /// Pesca um peixe e guarda na cesta
@@ -42,7 +36,10 @@ pub async fn handle_pesca(app_state: &AppState) {
 
 /// Trata mensagens advindas do servidor ou seja de peers pela rede
 pub async fn handle_server_message(
-    app_state: &AppState, msg: FNP, server: &ServerBackend, server_sender: Sender<FNP>,
+    app_state: &AppState, msg: FNP,
+    server: &ServerBackend,
+    client_addr: SocketAddr,
+    server_sender: Sender<FNP>,
     event_sender: Sender<Event>
 ) {
     match msg {
@@ -65,10 +62,10 @@ pub async fn handle_server_message(
             handle_server_inventory_showcase(app_state, rem, inventory).await;
         },
         FNP::AnnounceName { rem } => {
-            handle_server_announce_name(app_state, server, rem, server_sender).await;
+            handle_server_announce_name(server, rem, client_addr, server_sender).await;
         },
         FNP::PeerList { rem, peers, .. } => {
-            handle_server_peerlist(app_state, &peers, server, rem, event_sender).await;
+            handle_server_peerlist(&peers, server, rem, event_sender).await;
         },
     }
 }
@@ -94,30 +91,30 @@ pub async fn handle_ui_message(app_state: &AppState, msg: FNP, server_sender: Se
             handle_ui_tradeoffer(app_state, dest, offer).await;
         }
         _ => {
-            // Enviando a mensagem para o servidor mandar aos peers
-            server_sender.send(msg).await.ok();
+            ()
         }
     }
+    // Enviando a mensagem para o servidor mandar aos peers
+    server_sender.send(msg).await.ok();
 }
 
 
-async fn handle_server_announce_name(app_state: &AppState, server: &ServerBackend, rem: Peer, server_sender: Sender<FNP>) {
+async fn handle_server_announce_name(
+    server: &ServerBackend,
+    rem: Peer,
+    client_addr: SocketAddr,
+    server_sender: Sender<FNP>
+) {
     // Anúncio de nome e conexão, atualiza o registro de peers
-    let mut registry = app_state.peer_registry.lock();
-    if !registry.contains_key(rem.username()) {
-        crate::tui::log(&format!(
-            "{} ({}) se conectou.",
-            rem.username(),
-            rem.address()
-        ));
-        registry.insert(rem.username().into(), rem.clone());
 
-        let peers = registry.values().cloned().collect();
-        let peer_list_msg = FNP::PeerList {
-            rem: server.host(),
-            dest: rem,
-            peers,
-        };
+    // Se ainda não temos esse peer registrado
+    if server.peer_store().get_by_listener(&rem.address()).await.is_none() {
+        server.register_peer(rem.clone(), client_addr).await;
+
+        crate::tui::log(&format!( "{} ({}) se conectou.", rem.username(), rem.address() ));
+
+        let peers = server.peer_store().all_pears().await;
+        let peer_list_msg = FNP::PeerList {rem: server.host(), dest: rem, peers};
         server_sender.send(peer_list_msg).await.ok();
     }
 }
@@ -213,35 +210,33 @@ async fn handle_server_tradeconfirm(app_state: &AppState, response: bool, rem: P
     app_state.offer_buffers.lock().offers_made.remove(&rem.address());
 }
 
-async fn handle_server_peerlist(app_state: &AppState, peers: &[Peer], server: &ServerBackend, rem: Peer, sender: Sender<Event>) {
-    let mut to_connect: Vec<net::SocketAddr> = Vec::new();
-    {
-        let mut registry = app_state.peer_registry.lock();
-        for peer in peers {
-            if let std::collections::hash_map::Entry::Vacant(e) = registry.entry(peer.username().into()) {
-                crate::tui::log(&format!(
-                    "Adicionando {} ({}) à lista de peers.",
-                    peer.username(),
-                    peer.address()
-                ));
-                e.insert(peer.clone());
+async fn handle_server_peerlist(peers: &[Peer], server: &ServerBackend, rem: Peer, sender: Sender<Event>) {
+    let mut to_connect: Vec<std::net::SocketAddr> = Vec::new();
 
-                let peer_addr = peer.address();
+       // For each peer in the received list, ensure it's in PeerStore.
+       for peer in peers {
+           // Only add if not already present (by username or address)
+           if server.peer_store().get_by_username(peer.username()).await.is_none() {
+               // Decide if we should connect to this peer
+               let peer_addr = peer.address();
+               if peer.username() != server.host().username()
+                   && peer.username() != rem.username()
+                   && peer_addr < server.host().address()
+               {
+                   crate::tui::log(&format!(
+                       "Adicionando {} ({}) à lista de peers.",
+                       peer.username(),
+                       peer.address()
+                   ));
+                   to_connect.push(peer_addr);
+               }
+           }
+       }
 
-                if peer.username() != server.host().username()
-                    && peer.username() != rem.username()
-                    && peer_addr < server.host().address() {
-
-                    to_connect.push(peer.address());
-                }
-            }
-        }
-    }
-
-    if !to_connect.is_empty() {
-        println!("* Conectando aos novos peers...");
-        server.connect_to_many(&to_connect, sender.clone()).await;
-    }
+       if !to_connect.is_empty() {
+           println!("* Conectando aos novos peers...");
+           server.connect_to_many(&to_connect, sender.clone()).await;
+       }
 }
 
 async fn handle_ui_inventory_inspection(app_state: &AppState) {
@@ -258,11 +253,12 @@ async fn handle_ui_inventory_inspection(app_state: &AppState) {
 }
 
 async fn handle_ui_tradeoffer(app_state: &AppState, dest: &Peer, offer: &Offer) {
-    crate::tui::log("-- OFERTA FEITA --");
     app_state.offer_buffers
         .lock()
         .offers_made
-        .insert(dest.address(), offer.clone());}
+        .insert(dest.address(), offer.clone());
+    crate::tui::log("-- OFERTA FEITA --");
+}
 
 async fn handle_ui_tradeconfirm(app_state: &AppState, response: bool, offer: &Offer, dest: &Peer) {
     if response {

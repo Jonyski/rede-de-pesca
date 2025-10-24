@@ -52,9 +52,6 @@ fn main() -> io::Result<()> {
         )?);
 
         let host_peer = server.host();
-        app_state.peer_registry
-            .lock()
-            .insert(username.clone(), host_peer.clone());
         println!("Escutando no endereço {}", host_peer.address());
 
         // Conectando com os peers passados como argumento
@@ -71,6 +68,7 @@ fn main() -> io::Result<()> {
         // Spawna o handler de inputs do usuário, que envia msgs de UI para o dispatcher
         smol::spawn(fishnet::tui::eval(
             app_state.clone(),
+            server.peer_store(),
             sender.clone(),
             host_peer.clone()
         )).detach();

@@ -35,6 +35,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use super::peerstore::Peer;
 
 /// Fish Net Protocol
 #[derive(Debug, PartialEq, Clone)]
@@ -342,52 +343,6 @@ impl Display for FNP {
     }
 }
 
-/// Peer que representa um username e um endereço de socket com o prefixo fnp://
-#[derive(Debug, PartialEq, Clone)]
-pub struct Peer {
-    username: String,
-    address: SocketAddr,
-}
-
-impl Peer {
-    pub fn new(username: String, address: SocketAddr) -> Self {
-        Self { username, address }
-    }
-
-    pub fn address(&self) -> SocketAddr {
-        self.address
-    }
-
-    pub fn username(&self) -> &str {
-        &self.username
-    }
-}
-
-impl FromStr for Peer {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let sanitized = match s.strip_prefix("fnp://") {
-            Some(striped) => striped,
-            None => s,
-        };
-
-        let parts: Vec<&str> = sanitized.split('@').collect();
-        if parts.len() != 2 {
-            return Err("Invalid peer format".to_string());
-        }
-
-        let username = parts[0].to_string();
-        let address = parts[1].parse::<SocketAddr>().map_err(|e| e.to_string())?;
-        Ok(Self { username, address })
-    }
-}
-
-impl Display for Peer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fnp://{}@{}", self.username, self.address)
-    }
-}
 
 /// Item do inventario. Peixe e quantidade
 #[derive(Debug, PartialEq, Clone)]
@@ -539,8 +494,8 @@ mod tests {
     #[test]
     fn test_peer_parsing_valid() {
         let peer: Peer = "fnp://user@127.0.0.1:6000".parse().unwrap();
-        assert_eq!(peer.username, "user");
-        assert_eq!(peer.address, "127.0.0.1:6000".parse().unwrap());
+        assert_eq!(peer.username(), "user");
+        assert_eq!(peer.address(), "127.0.0.1:6000".parse().unwrap());
     }
 
     #[test]
@@ -600,10 +555,10 @@ mod tests {
     // Testes para Display implementations
     #[test]
     fn test_peer_display() {
-        let peer = Peer {
-            username: "user".to_string(),
-            address: "127.0.0.1:6000".parse().unwrap(),
-        };
+        let peer = Peer::new(
+            "user".to_string(),
+            "127.0.0.1:6000".parse().unwrap(),
+        );
         assert_eq!(peer.to_string(), "fnp://user@127.0.0.1:6000");
     }
 

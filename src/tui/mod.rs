@@ -1,5 +1,6 @@
 mod cli;
 
+use crate::server::peerstore::PeerStore;
 use crate::AppState;
 use crate::Event;
 use crate::server;
@@ -47,6 +48,7 @@ pub fn ask_username() -> String {
 /// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(
     app_state: Arc<AppState>,
+    peer_store: Arc<PeerStore>,
     sender: Sender<Event>,
     my_peer: Peer,
 
@@ -69,7 +71,7 @@ pub async fn eval(
                 continue;
             } else if parts[0].to_lowercase() == "$l" || parts[0].to_lowercase() == "$listar" {
                 log("-- PESCADORES ONLINE --");
-                for peer in app_state.peer_registry.lock().values() {
+                for peer in peer_store.all_pears().await {
                     log(&format!("> {} ({})", peer.username(), peer.address()));
                 }
                 continue;
@@ -77,11 +79,11 @@ pub async fn eval(
             // Inspeção de inventário
             if parts[0].to_lowercase() == "$i" || parts[0].to_lowercase() == "$inventario" {
                 if let Some(peer_name) = parts.get(1) {
-                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
+                    if let Some(peer_info) = peer_store.get_by_username(peer_name).await {
                         sender
                             .send(Event::UIMessage(server::FNP::InventoryInspection {
                                 rem: my_peer.clone(),
-                                dest: peer.clone(),
+                                dest: peer_info.peer.clone(),
                             }))
                             .await
                             .ok();
@@ -111,7 +113,7 @@ pub async fn eval(
                 }
 
                 if let Some(peer_name) = parts.get(1) {
-                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
+                    if let Some(peer_info) = peer_store.get_by_username(peer_name).await {
                         if let Ok(offer) = Offer::from_str(&parts[2..].join(" ")) {
                             let basket = app_state.basket.lock();
                             let offers_made = &app_state.offer_buffers.lock().offers_made;
@@ -154,7 +156,7 @@ pub async fn eval(
                                 sender
                                     .send(Event::UIMessage(server::FNP::TradeOffer {
                                         rem: my_peer.clone(),
-                                        dest: peer.clone(),
+                                        dest: peer_info.peer.clone(),
                                         offer,
                                     }))
                                     .await
@@ -172,15 +174,15 @@ pub async fn eval(
             // Confirmação de troca
             if parts[0].to_lowercase() == "$c" || parts[0].to_lowercase() == "$confirmar" {
                 if let (Some(response), Some(peer_name)) = (parts.get(1), parts.get(2)) {
-                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
+                    if let Some(peer_info) = peer_store.get_by_username(peer_name).await {
                         if let Some(offer) =
-                            app_state.offer_buffers.lock().offers_received.get(&peer.address())
+                            app_state.offer_buffers.lock().offers_received.get(&peer_info.peer.address())
                         {
                             let response = *response == "s" || *response == "sim";
                             sender
                                 .send(Event::UIMessage(server::FNP::TradeConfirm {
                                     rem: my_peer.clone(),
-                                    dest: peer.clone(),
+                                    dest: peer_info.peer.clone(),
                                     response,
                                     offer: offer.clone(),
                                 }))
@@ -199,7 +201,7 @@ pub async fn eval(
             }
 
             if parts[0].to_lowercase() == "$q" || parts[0].to_lowercase() == "$quit" {
-                log("Quitting fishnet, wait a minute...");
+                log("Encerrando fishnet, boa pescaria...");
                 std::process::exit(0);
             }
 
@@ -212,7 +214,7 @@ pub async fn eval(
                 log("\t $[p]escar - Pesca um peixe aleatorio.");
                 log("\t $[i]nventario <peer> - Mostra o inventário do jogador, pode opcionalmente mostrar o inventário de um peer.");
                 log("\t $[t]roca <peer> (peixe|quatidade,... > peixe|quantidade,...) - Envia uma oferta de troca para um peer.");
-                log("\t $[c]onfirmar <s|n> - Pedido de confirmação de troca" );
+                log("\t $[c]onfirmar <s|n> <peer> - Pedido de confirmação de troca" );
                 log("\t $[q]uit - Encerra o programa.");
                 log("\t $[h]elp - Mostra essa mensagem de ajuda.");
                 continue;
@@ -226,10 +228,10 @@ pub async fn eval(
         let msg = if line.starts_with('@') {
             if let Some((peer_name, text)) = line.split_once(' ') {
                 let peer_name = peer_name.strip_prefix('@').unwrap_or(peer_name);
-                if let Some(peer) = app_state.peer_registry.lock().get(peer_name) {
+                if let Some(peer_info) = peer_store.get_by_username(peer_name).await {
                     server::FNP::Message {
                         rem: my_peer.clone(),
-                        dest: peer.clone(),
+                        dest: peer_info.peer.clone(),
                         content: text.to_string(),
                     }
                 } else {
