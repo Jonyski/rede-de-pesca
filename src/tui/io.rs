@@ -1,5 +1,5 @@
-use std::io::Write;
 use regex::Regex;
+use std::io::Write;
 
 /// Pergunta o nome do usuário repetidamente até que o nome obedeça as retrições: (no minimo três
 /// caracteres, e contenha caracteres alfanuméricos, barra ou underscore)
@@ -12,7 +12,9 @@ pub fn ask_username() -> String {
     loop {
         print!("Escolha um nome de usuário: ");
         // Força o print a acontecer. Detalhes do macro print!
-        std::io::stdout().flush().expect("Falha ao limpar o buffer da saída padrão.");
+        std::io::stdout()
+            .flush()
+            .expect("Falha ao limpar o buffer da saída padrão.");
         std::io::stdin()
             .read_line(&mut username)
             .expect("Não foi possível ler da entrada padrão.");

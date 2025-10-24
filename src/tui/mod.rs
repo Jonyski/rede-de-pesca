@@ -1,27 +1,26 @@
 mod cli;
-mod style;
 mod commands;
 mod handler;
 mod io;
+mod style;
 
-pub use style::log;
-pub use style::err;
+pub use cli::Args;
 pub use io::ask_username;
+pub use style::err;
+pub use style::log;
 
-use crate::server::peerstore::PeerStore;
-use crate::tui::commands::parse_command;
-use crate::tui::handler::handle_command;
 use crate::AppState;
 use crate::Event;
 use crate::server;
 use crate::server::Peer;
+use crate::server::peerstore::PeerStore;
+use crate::tui::commands::parse_command;
+use crate::tui::handler::handle_command;
 use async_channel::Sender;
-pub use cli::Args;
 use smol::Unblock;
 use smol::io::{AsyncBufReadExt, BufReader};
 use smol::stream::StreamExt;
 use std::sync::Arc;
-
 
 /// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(
@@ -35,7 +34,14 @@ pub async fn eval(
 
     while let Some(Ok(line)) = lines.next().await {
         if let Some(cmd) = parse_command(&line) {
-            handle_command(cmd, app_state.clone(), peer_store.clone(), sender.clone(), my_peer.clone()).await;
+            handle_command(
+                cmd,
+                app_state.clone(),
+                peer_store.clone(),
+                sender.clone(),
+                my_peer.clone(),
+            )
+            .await;
             continue;
         }
 
@@ -57,7 +63,10 @@ pub async fn eval(
                 continue;
             }
         } else {
-            server::FNP::Broadcast { rem: my_peer.clone(), content: line }
+            server::FNP::Broadcast {
+                rem: my_peer.clone(),
+                content: line,
+            }
         };
 
         sender.send(Event::UIMessage(msg)).await.ok();

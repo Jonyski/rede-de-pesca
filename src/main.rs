@@ -46,10 +46,7 @@ fn main() -> io::Result<()> {
 
         let app_state = Arc::new(AppState::new());
 
-        let server = Arc::new(fishnet::ServerBackend::new(
-            &username,
-            requested_addr
-        )?);
+        let server = Arc::new(fishnet::ServerBackend::new(&username, requested_addr)?);
 
         let host_peer = server.host();
         println!("Escutando no endereço {}", host_peer.address());
@@ -58,7 +55,14 @@ fn main() -> io::Result<()> {
         server.connect_to_many(args.peers(), sender.clone()).await;
 
         // Spawna a thread do dispatcher
-        smol::spawn(fishnet::dispatch(app_state.clone(), server.clone(), ssender, sender.clone(), receiver)).detach();
+        smol::spawn(fishnet::dispatch(
+            app_state.clone(),
+            server.clone(),
+            ssender,
+            sender.clone(),
+            receiver,
+        ))
+        .detach();
 
         println!(
             "Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)",
@@ -70,8 +74,9 @@ fn main() -> io::Result<()> {
             app_state.clone(),
             server.peer_store(),
             sender.clone(),
-            host_peer.clone()
-        )).detach();
+            host_peer.clone(),
+        ))
+        .detach();
 
         // Deixa o server escutando sempre novas conexões de peers entrando na rede de pesca
         server.run(sreceiver, sender).await

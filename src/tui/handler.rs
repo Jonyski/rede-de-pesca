@@ -2,8 +2,11 @@ use std::{str::FromStr, sync::Arc};
 
 use async_channel::Sender;
 
-use crate::{server::{self, peerstore::PeerStore, protocol::Offer, Peer}, tui::{commands::Command, err, log}, AppState, Event};
-
+use crate::{
+    AppState, Event,
+    server::{self, Peer, peerstore::PeerStore, protocol::Offer},
+    tui::{commands::Command, err, log},
+};
 
 /// Handle para comandos da UI. Trata de forma adequada.
 pub async fn handle_command(
@@ -11,19 +14,19 @@ pub async fn handle_command(
     app_state: Arc<AppState>,
     peer_store: Arc<PeerStore>,
     sender: Sender<Event>,
-    my_peer: Peer
+    my_peer: Peer,
 ) {
     match cmd {
         Command::Pescar => {
             sender.send(Event::Pesca).await.ok();
-        },
+        }
         Command::List => {
             log("-- PESCADORES ONLINE --");
             for peer in peer_store.all_pears().await {
                 log(&format!("> {} ({})", peer.username(), peer.address()));
             }
-        },
-        Command::Inventario(name) =>{
+        }
+        Command::Inventario(name) => {
             if let Some(peer_name) = name {
                 if let Some(peer_info) = peer_store.get_by_username(&peer_name).await {
                     sender
@@ -46,10 +49,15 @@ pub async fn handle_command(
                     .await
                     .ok();
             }
-        },
-        Command::Trade { peer_str, offer_str } => {
+        }
+        Command::Trade {
+            peer_str,
+            offer_str,
+        } => {
             if peer_str.is_empty() || offer_str.is_empty() {
-                err( "Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,..." );
+                err(
+                    "Formato de oferta errado, o correto é:\n $t nome peixe|x,peixe|y,... > peixe|z,peixe|w,...",
+                );
                 return;
             }
 
@@ -109,7 +117,7 @@ pub async fn handle_command(
                                 .await
                                 .ok();
                         }
-                    },
+                    }
                     Err(_) => {
                         err("* Argumentos de oferta inválidos.");
                     }
@@ -117,10 +125,9 @@ pub async fn handle_command(
             } else {
                 err("* Peer não encontrado.");
             }
-        },
+        }
         Command::ConfirmTrade { resp, peer_str } => {
             if let Some(peer_info) = peer_store.get_by_username(&peer_str).await {
-
                 let opt_offer = {
                     let guard = app_state.offer_buffers.lock();
                     guard
@@ -145,11 +152,11 @@ pub async fn handle_command(
             } else {
                 err("* Peer não encontrado.");
             }
-        },
+        }
         Command::Quit => {
             log("Encerrando fishnet, boa pescaria...");
             std::process::exit(0);
-        },
+        }
         Command::Help => {
             log("fishnet 1.0.0");
             log("Options:");
@@ -157,14 +164,18 @@ pub async fn handle_command(
             log("\t @peer - Envia uma mensagem direta para um dado peer.");
             log("\t $[l]istar - Lista todos os peers conectados a você.");
             log("\t $[p]escar - Pesca um peixe aleatorio.");
-            log("\t $[i]nventario <peer> - Mostra o inventário do jogador, pode opcionalmente mostrar o inventário de um peer.");
-            log("\t $[t]roca <peer> (peixe|quatidade,... > peixe|quantidade,...) - Envia uma oferta de troca para um peer.");
-            log("\t $[c]onfirmar <s|n> <peer> - Pedido de confirmação de troca" );
+            log(
+                "\t $[i]nventario <peer> - Mostra o inventário do jogador, pode opcionalmente mostrar o inventário de um peer.",
+            );
+            log(
+                "\t $[t]roca <peer> (peixe|quatidade,... > peixe|quantidade,...) - Envia uma oferta de troca para um peer.",
+            );
+            log("\t $[c]onfirmar <s|n> <peer> - Pedido de confirmação de troca");
             log("\t $[q]uit - Encerra o programa.");
             log("\t $[h]elp - Mostra essa mensagem de ajuda.");
-        },
+        }
         Command::Unknown(unk) => {
             err(&format!("Comando ({}) não existe", unk));
-        },
+        }
     }
 }

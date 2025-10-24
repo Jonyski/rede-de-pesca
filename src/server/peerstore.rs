@@ -1,9 +1,18 @@
-use crate::{server::protocol::FNPParser, Event, FNP};
-use std::{collections::HashMap, fmt::Display, net::{SocketAddr, TcpStream}, str::FromStr, sync::Arc};
+use crate::{Event, FNP, server::protocol::FNPParser};
 use async_channel::Sender;
 use async_dup::Mutex;
-use smol::{io::{AsyncBufReadExt, AsyncWriteExt}, stream::StreamExt, Async};
-
+use smol::{
+    Async,
+    io::{AsyncBufReadExt, AsyncWriteExt},
+    stream::StreamExt,
+};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    net::{SocketAddr, TcpStream},
+    str::FromStr,
+    sync::Arc,
+};
 
 pub struct PeerStore {
     // Mapeia endereço de escuta para peers
@@ -11,14 +20,14 @@ pub struct PeerStore {
     // Mapeia o endereço de cliente para o endereço de listener.
     client_to_listener_map: Mutex<HashMap<SocketAddr, SocketAddr>>,
     // Mapeia o nome dos peers ao seus endereços de listener.
-    name_addr_map: Mutex<HashMap<Box<str>, SocketAddr>>
+    name_addr_map: Mutex<HashMap<Box<str>, SocketAddr>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PeerInfo {
     pub peer: Peer,
     pub client_addr: SocketAddr,
-    pub conn: Arc<Connection>
+    pub conn: Arc<Connection>,
 }
 
 /// Peer que representa um username e um endereço de socket com o prefixo fnp://
@@ -31,12 +40,10 @@ pub struct Peer {
 /// Representa uma conexão TCP entre dois peers
 #[derive(Debug)]
 pub struct Connection {
-    stream: Async<TcpStream>
+    stream: Async<TcpStream>,
 }
 
-
 impl PeerStore {
-
     pub fn new() -> Self {
         Self {
             listener_map: Mutex::new(HashMap::new()),
@@ -48,10 +55,18 @@ impl PeerStore {
     /// Registra o peer, seu endereço de cliente e sua conexão
     pub async fn register(&self, peer: Peer, client_addr: SocketAddr, conn: Arc<Connection>) {
         let listener = peer.address();
-        let info = PeerInfo {peer: peer.clone(), client_addr, conn };
+        let info = PeerInfo {
+            peer: peer.clone(),
+            client_addr,
+            conn,
+        };
         self.listener_map.lock().insert(listener, info);
-        self.client_to_listener_map.lock().insert(client_addr, listener);
-        self.name_addr_map.lock().insert(peer.username().into(), listener);
+        self.client_to_listener_map
+            .lock()
+            .insert(client_addr, listener);
+        self.name_addr_map
+            .lock()
+            .insert(peer.username().into(), listener);
     }
 
     /// Remove informações do peer através do seu endereço de cliente.
@@ -68,7 +83,8 @@ impl PeerStore {
 
     pub async fn unregister_by_username(&self, username: &str) -> Option<PeerInfo> {
         if let Some(client_addr) = self.name_addr_map.lock().remove(username)
-        && let Some(listener) = self.client_to_listener_map.lock().remove(&client_addr) {
+            && let Some(listener) = self.client_to_listener_map.lock().remove(&client_addr)
+        {
             return self.listener_map.lock().remove(&listener);
         }
         None
@@ -88,16 +104,25 @@ impl PeerStore {
         }
     }
 
-    pub async fn all_pears(&self) -> Vec<Peer>{
-        self.listener_map.lock().values().map(|i| &i.peer).cloned().collect()
+    pub async fn all_pears(&self) -> Vec<Peer> {
+        self.listener_map
+            .lock()
+            .values()
+            .map(|i| &i.peer)
+            .cloned()
+            .collect()
     }
 
     /// Envia uma mensagem a todos os peer registrados
     pub async fn broadcast(&self, host: Peer, msg: FNP) {
-        let conns: Vec<Arc<Connection>> = self.listener_map.lock().values()
-            .map(|i| i.conn.clone()).collect();
+        let conns: Vec<Arc<Connection>> = self
+            .listener_map
+            .lock()
+            .values()
+            .map(|i| i.conn.clone())
+            .collect();
         let m = msg.set_rem(host);
-        for c in conns  {
+        for c in conns {
             c.send_fnp(&m).await.ok();
         }
     }
@@ -113,7 +138,7 @@ impl PeerStore {
 
 impl Connection {
     pub fn new(stream: Async<TcpStream>) -> Self {
-        Self {stream}
+        Self { stream }
     }
 
     pub fn stream(&self) -> &Async<TcpStream> {
@@ -130,7 +155,10 @@ impl Connection {
         sender: Sender<Event>,
         // shutdown receiver
     ) {
-        let peer_addr = self.stream().get_ref().peer_addr()
+        let peer_addr = self
+            .stream()
+            .get_ref()
+            .peer_addr()
             .expect("Peer address deveria estar acessível.");
         let mut lines = smol::io::BufReader::new(self.stream()).lines();
         while let Some(Ok(line)) = lines.next().await {
@@ -142,7 +170,6 @@ impl Connection {
         }
     }
 }
-
 
 impl Peer {
     pub fn new(username: String, address: SocketAddr) -> Self {

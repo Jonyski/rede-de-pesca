@@ -8,8 +8,8 @@
 
 pub mod handlers;
 
-use std::net::SocketAddr;
 use crate::server;
+use std::net::SocketAddr;
 
 /// Os 4 tipos de eventos com os quais o dispatcher lida
 pub enum Event {

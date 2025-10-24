@@ -1,6 +1,6 @@
-pub mod protocol;
 pub mod backend;
 pub mod peerstore;
+pub mod protocol;
 
 pub use backend::ServerBackend;
 

@@ -17,11 +17,11 @@ pub enum Command {
     Pescar,
     List,
     Inventario(Option<String>),
-    Trade {peer_str: String, offer_str: String},
-    ConfirmTrade {resp: bool, peer_str: String},
+    Trade { peer_str: String, offer_str: String },
+    ConfirmTrade { resp: bool, peer_str: String },
     Quit,
     Help,
-    Unknown(String)
+    Unknown(String),
 }
 
 /// Parser para comandos da UI. Lê uma linha e identifica se há um comando com
@@ -29,8 +29,12 @@ pub enum Command {
 pub fn parse_command(line: &str) -> Option<Command> {
     let line = line.trim();
 
-    if line.is_empty() { return None; }
-    if !line.starts_with("$") { return None; }
+    if line.is_empty() {
+        return None;
+    }
+    if !line.starts_with("$") {
+        return None;
+    }
 
     let parts = line.split_whitespace().collect::<Vec<_>>();
     let cmd = parts.get(0).map(|s| s.to_lowercase()).unwrap_or_default();
@@ -44,12 +48,17 @@ pub fn parse_command(line: &str) -> Option<Command> {
         "$t" | "$troca" => {
             let peer_str = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
             let offer_str = parts.get(2..).unwrap_or(&[]).join(" ");
-            Some(Command::Trade { peer_str, offer_str })
+            Some(Command::Trade {
+                peer_str,
+                offer_str,
+            })
         }
         "$c" | "$confirmar" => {
-            let resp = parts.get(1)
+            let resp = parts
+                .get(1)
                 .map(|s| s.to_lowercase())
-                .map(|s| s == "s" || s == "sim").unwrap_or(false);
+                .map(|s| s == "s" || s == "sim")
+                .unwrap_or(false);
             let peer_str = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
             Some(Command::ConfirmTrade { resp, peer_str })
         }
@@ -58,7 +67,6 @@ pub fn parse_command(line: &str) -> Option<Command> {
         _ => Some(Command::Unknown(line.to_string())),
     }
 }
-
 
 /*
  *
@@ -117,7 +125,7 @@ mod tests {
         );
         assert_eq!(
             parse_command("$c n bob"),
-            Some(Command::ConfirmTrade{
+            Some(Command::ConfirmTrade {
                 resp: false,
                 peer_str: "bob".to_string()
             })

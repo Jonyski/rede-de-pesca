@@ -1,6 +1,5 @@
 use owo_colors::Style;
 
-
 pub fn log(msg: &str) {
     println!("{}", style_log_msg(msg));
 }

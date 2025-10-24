@@ -1,18 +1,17 @@
+pub use crate::event::Event;
+use crate::event::handlers;
 use crate::gameplay::FishBasket;
 use crate::gameplay::FishCatalog;
 pub use crate::server::ServerBackend;
-pub use crate::event::Event;
 use crate::server::{FNP, Peer, protocol::OfferBuff};
-use crate::event::handlers;
 use async_channel::{Receiver, Sender};
 use async_dup::Mutex;
 use std::{collections::HashMap, sync::Arc};
 
+pub mod event;
 pub mod gameplay;
 pub mod server;
 pub mod tui;
-pub mod event;
-
 
 pub type PeerRegistry = HashMap<String, Peer>;
 
@@ -48,22 +47,24 @@ pub async fn dispatch(
         match event {
             Event::PeerDisconnected(socket_addr) => {
                 handlers::handle_peer_disconnected(&server.clone(), socket_addr).await;
-            },
+            }
             Event::ServerMessage(fnp, socket_addr) => {
-                handlers::handle_server_message(&app_state.clone(),
+                handlers::handle_server_message(
+                    &app_state.clone(),
                     fnp,
                     &server.clone(),
                     socket_addr,
                     server_sender.clone(),
-                    event_sender.clone()
-                ).await;
-            },
+                    event_sender.clone(),
+                )
+                .await;
+            }
             Event::UIMessage(fnp) => {
                 handlers::handle_ui_message(&app_state.clone(), fnp, server_sender.clone()).await;
-            },
+            }
             Event::Pesca => {
                 handlers::handle_pesca(&app_state.clone()).await;
-            },
+            }
         }
     }
     Ok(())

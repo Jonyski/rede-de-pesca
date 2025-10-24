@@ -30,12 +30,12 @@
  * Peers: user1@127.0.0.1:6000,user2@127.0.0.1:6001;
  * */
 
+use super::peerstore::Peer;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use super::peerstore::Peer;
 
 /// Fish Net Protocol
 #[derive(Debug, PartialEq, Clone)]
@@ -343,7 +343,6 @@ impl Display for FNP {
     }
 }
 
-
 /// Item do inventario. Peixe e quantidade
 #[derive(Debug, PartialEq, Clone)]
 pub struct InventoryItem {
@@ -555,10 +554,7 @@ mod tests {
     // Testes para Display implementations
     #[test]
     fn test_peer_display() {
-        let peer = Peer::new(
-            "user".to_string(),
-            "127.0.0.1:6000".parse().unwrap(),
-        );
+        let peer = Peer::new("user".to_string(), "127.0.0.1:6000".parse().unwrap());
         assert_eq!(peer.to_string(), "fnp://user@127.0.0.1:6000");
     }
 
