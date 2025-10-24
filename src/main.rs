@@ -17,72 +17,53 @@
 // --------------------------------------------------------
 //
 
-use std::{collections::HashMap, io::Write, sync::Arc};
+use std::sync::Arc;
 
 use async_channel::unbounded;
-use async_dup::Mutex;
 use clap::Parser;
-use fishnet::{FishBasket, PeerRegistry, server::protocol::OfferBuff};
-use regex::Regex;
 use smol::io;
+
+// Importando elementos do nosso próprio pacote (fishnet)/importando lib.rs
+use fishnet::AppState;
 
 /// Endereço de IP do primeiro peer: 127.0.0.1:6000
 const DEFAULT_HOST: ([u8; 4], u16) = ([127, 0, 0, 1], 6000);
 
 fn main() -> io::Result<()> {
+    // Bloqueamos a thread principal a espera de eventos assincronos
     smol::block_on(async {
+        // Lemos argumentos do programa
         let args = fishnet::tui::Args::parse();
-        let (sender, receiver) = unbounded();
-        let username = ask_username();
-
-        let fish_catalog = Arc::new(fishnet::tui::FishCatalog::new());
-        let basket = Arc::new(Mutex::new(FishBasket::new()));
-        let offer_buffers = Arc::new(Mutex::new(OfferBuff::default()));
-        let peer_registry: PeerRegistry = Arc::new(Mutex::new(HashMap::new()));
+        // Pergunta nome do usuário
+        let username = fishnet::tui::ask_username();
 
         // O primeiro peer sempre se conecta na porta 6000, os outros escolhem
-        let requested_addr = if args.first() {
-            DEFAULT_HOST.into()
-        } else {
-            args.bind()
-        };
+        let requested_addr = args.bind_port().unwrap_or(DEFAULT_HOST.into());
 
-        let server = Arc::new(fishnet::server::Server::new(&username, requested_addr)?);
-        let host_peer = server.host_peer().clone();
-        peer_registry
-            .lock()
-            .insert(username.clone(), host_peer.clone());
+        // Inicializa channels
+        let (sender, receiver) = unbounded();
+        let (ssender, sreceiver) = unbounded();
+
+        let app_state = Arc::new(AppState::new());
+
+        let server = Arc::new(fishnet::ServerBackend::new(&username, requested_addr)?);
+
+        let host_peer = server.host();
         println!("Escutando no endereço {}", host_peer.address());
 
         // Conectando com os peers passados como argumento
         server.connect_to_many(args.peers(), sender.clone()).await;
 
-        let (ssender, sreceiver) = unbounded();
-        let serverc = server.clone();
-
-        // Spawna a thread do servidor que envia mensagens para o dispatcher
-        let dispatcher_sender = sender.clone();
-        smol::spawn(async move {
-            serverc
-                .send_messages(sreceiver, dispatcher_sender)
-                .await
-                .ok();
-        })
-        .detach();
-
         // Spawna a thread do dispatcher
         smol::spawn(fishnet::dispatch(
+            app_state.clone(),
             server.clone(),
-            sender.clone(),
-            host_peer.clone(),
             ssender,
-            fish_catalog.clone(),
-            basket.clone(),
-            offer_buffers.clone(),
-            peer_registry.clone(),
+            sender.clone(),
             receiver,
         ))
         .detach();
+
         println!(
             "Bem vindo {}, à Rede de Pesca!\nFique a vontade para pascar e conversar :)",
             username
@@ -90,38 +71,14 @@ fn main() -> io::Result<()> {
 
         // Spawna o handler de inputs do usuário, que envia msgs de UI para o dispatcher
         smol::spawn(fishnet::tui::eval(
+            app_state.clone(),
+            server.peer_store(),
             sender.clone(),
             host_peer.clone(),
-            offer_buffers.clone(),
-            peer_registry.clone(),
-            basket.clone(),
         ))
         .detach();
 
         // Deixa o server escutando sempre novas conexões de peers entrando na rede de pesca
-        server.listen(sender.clone()).await
+        server.run(sreceiver, sender).await
     })
-}
-
-/// Pergunta o nome do usuário repetidamente até que o nome obedeça as retrições: (no minimo três
-/// caracteres, e contenha caracteres alfanuméricos, barra ou underscore)
-fn ask_username() -> String {
-    let mut username = String::new();
-    let username_pattern =
-        Regex::new(r"^[A-Za-z][A-Za-z0-9_-]{2,}$").expect("Invalid regex pattern");
-    loop {
-        print!("Escolha um nome de usuário: ");
-        std::io::stdout().flush().expect("Falha ao limpar o buffer");
-        std::io::stdin()
-            .read_line(&mut username)
-            .expect("Não foi possível ler da entrada padrão.");
-        let name = username.trim();
-        if username_pattern.is_match(name) {
-            return name.to_owned();
-        }
-        println!(
-            "Nome de usuário inválido. Seu nome de usuário deve\n- Começar com um letras do alfabeto\n- Ter no mínimo 3 caracteres\n- Usar apenas letras, números, hífens ou underscores."
-        );
-        username.clear();
-    }
 }

@@ -26,12 +26,13 @@ impl Args {
         &self.peers
     }
 
-    pub fn bind(&self) -> SocketAddr {
-        self.bind.unwrap()
+    pub fn bind_port(&self) -> Option<SocketAddr> {
+        self.bind
     }
 }
 
 /// Parseando e validando os endereços
 fn parse_addr(s: &str) -> Result<SocketAddr, String> {
-    s.parse().map_err(|e| format!("Invalid bind/peer address: {}", e))
+    s.parse()
+        .map_err(|e| format!("Invalid bind/peer address: {}", e))
 }
