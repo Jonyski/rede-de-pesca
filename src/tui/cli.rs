@@ -26,8 +26,8 @@ impl Args {
         &self.peers
     }
 
-    pub fn bind(&self) -> SocketAddr {
-        self.bind.unwrap()
+    pub fn bind_port(&self) -> Option<SocketAddr> {
+        self.bind
     }
 }
 

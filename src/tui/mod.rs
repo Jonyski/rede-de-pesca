@@ -1,33 +1,55 @@
 mod cli;
-mod fisher;
 
+use crate::AppState;
 use crate::Event;
-use crate::PeerRegistry;
-pub use crate::inventory::FishBasket;
 use crate::server;
 use crate::server::Peer;
-use crate::server::protocol::{Offer, OfferBuff};
+use crate::server::protocol::Offer;
 use async_channel::Sender;
-use async_dup::Mutex;
 pub use cli::Args;
-pub use fisher::FishCatalog;
-pub use fisher::fishing;
-use owo_colors::{Style, Styled};
+use owo_colors::Style;
+use regex::Regex;
 use smol::Unblock;
 use smol::io::{AsyncBufReadExt, BufReader};
 use smol::stream::StreamExt;
-use std::net::SocketAddr;
-use std::process::exit;
+use std::io::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
+/// Pergunta o nome do usuário repetidamente até que o nome obedeça as retrições: (no minimo três
+/// caracteres, e contenha caracteres alfanuméricos, barra ou underscore)
+pub fn ask_username() -> String {
+    let mut username = String::new();
+    // Regex para verificar se o nome de usuário é válido
+    // Condições: min. 3 caracters, inicia com letra, é alphanum ou - ou _
+    let username_pattern =
+        Regex::new(r"^[A-Za-z][A-Za-z0-9_-]{2,}$").expect("Padrão de regex inválido");
+    loop {
+        print!("Escolha um nome de usuário: ");
+        // Força o print a acontecer. Detalhes do macro print!
+        std::io::stdout().flush().expect("Falha ao limpar o buffer da saída padrão.");
+        std::io::stdin()
+            .read_line(&mut username)
+            .expect("Não foi possível ler da entrada padrão.");
+        let name = username.trim();
+        if username_pattern.is_match(name) {
+            // Não podemos retornar uma referência do buffer, copiamos nome para
+            //  uma String no heap e retornamos
+            return name.to_owned();
+        }
+        println!(
+            "Nome de usuário inválido. Seu nome de usuário deve\n- Começar com um letras do alfabeto\n- Ter no mínimo 3 caracteres\n- Usar apenas letras, números, hífens ou underscores."
+        );
+        username.clear();
+    }
+}
+
 /// Loop para a interface do usuário, aguarda entradas de texto e emite sinais de acordo.
 pub async fn eval(
+    app_state: Arc<AppState>,
     sender: Sender<Event>,
     my_peer: Peer,
-    offer_buffers: Arc<Mutex<OfferBuff>>,
-    peer_registry: PeerRegistry,
-    fish_basket: Arc<Mutex<FishBasket>>,
+
 ) {
     let stdin = Unblock::new(std::io::stdin());
     let mut lines = BufReader::new(stdin).lines();
@@ -40,14 +62,14 @@ pub async fn eval(
 
         // Executando comandos
         if line.starts_with('$') {
-            let mut parts = line.split_whitespace().collect::<Vec<_>>();
+            let parts = line.split_whitespace().collect::<Vec<_>>();
             // Pesca e listagem de Peers
             if parts[0].to_lowercase() == "$p" || parts[0].to_lowercase() == "$pescar" {
                 sender.send(Event::Pesca).await.ok();
                 continue;
             } else if parts[0].to_lowercase() == "$l" || parts[0].to_lowercase() == "$listar" {
                 log("-- PESCADORES ONLINE --");
-                for peer in peer_registry.lock().values() {
+                for peer in app_state.peer_registry.lock().values() {
                     log(&format!("> {} ({})", peer.username(), peer.address()));
                 }
                 continue;
@@ -55,7 +77,7 @@ pub async fn eval(
             // Inspeção de inventário
             if parts[0].to_lowercase() == "$i" || parts[0].to_lowercase() == "$inventario" {
                 if let Some(peer_name) = parts.get(1) {
-                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
                         sender
                             .send(Event::UIMessage(server::FNP::InventoryInspection {
                                 rem: my_peer.clone(),
@@ -89,10 +111,10 @@ pub async fn eval(
                 }
 
                 if let Some(peer_name) = parts.get(1) {
-                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
                         if let Ok(offer) = Offer::from_str(&parts[2..].join(" ")) {
-                            let basket = fish_basket.lock();
-                            let offers_made = &offer_buffers.lock().offers_made;
+                            let basket = app_state.basket.lock();
+                            let offers_made = &app_state.offer_buffers.lock().offers_made;
 
                             // First, calculate how many of each fish are tied up in other offers
                             let mut offered_quantities: std::collections::HashMap<String, u32> =
@@ -139,10 +161,10 @@ pub async fn eval(
                                     .ok();
                             }
                         } else {
-                            err("Argumentos de oferta inválidos.");
+                            err("* Argumentos de oferta inválidos.");
                         }
                     } else {
-                        err("Peer não encontrado.");
+                        err("* Peer não encontrado.");
                     }
                 }
                 continue;
@@ -150,9 +172,9 @@ pub async fn eval(
             // Confirmação de troca
             if parts[0].to_lowercase() == "$c" || parts[0].to_lowercase() == "$confirmar" {
                 if let (Some(response), Some(peer_name)) = (parts.get(1), parts.get(2)) {
-                    if let Some(peer) = peer_registry.lock().get(*peer_name) {
+                    if let Some(peer) = app_state.peer_registry.lock().get(*peer_name) {
                         if let Some(offer) =
-                            offer_buffers.lock().offers_received.get(&peer.address())
+                            app_state.offer_buffers.lock().offers_received.get(&peer.address())
                         {
                             let response = *response == "s" || *response == "sim";
                             sender
@@ -165,20 +187,20 @@ pub async fn eval(
                                 .await
                                 .ok();
                         } else {
-                            err("Nenhuma oferta encontrada para este peer.");
+                            err("* Nenhuma oferta encontrada para este peer.");
                         }
                     } else {
-                        err("Peer não encontrado.");
+                        err("* Peer não encontrado.");
                     }
                 } else {
-                    err("Argumentos inválidos para a confirmação de troca.");
+                    err("* Argumentos inválidos para a confirmação de troca.");
                 }
                 continue;
             }
 
             if parts[0].to_lowercase() == "$q" || parts[0].to_lowercase() == "$quit" {
                 log("Quitting fishnet, wait a minute...");
-                exit(0);
+                std::process::exit(0);
             }
 
             if parts[0].to_lowercase() == "$h" || parts[0].to_lowercase() == "$help" {
@@ -189,7 +211,7 @@ pub async fn eval(
                 log("\t $[l]istar - Lista todos os peers conectados a você.");
                 log("\t $[p]escar - Pesca um peixe aleatorio.");
                 log("\t $[i]nventario <peer> - Mostra o inventário do jogador, pode opcionalmente mostrar o inventário de um peer.");
-                log("\t $[t]roca (peixe|quatidade,... > peixe|quantidade,...) <peer> - Envia uma oferta de troca para um peer.");
+                log("\t $[t]roca <peer> (peixe|quatidade,... > peixe|quantidade,...) - Envia uma oferta de troca para um peer.");
                 log("\t $[c]onfirmar <s|n> - Pedido de confirmação de troca" );
                 log("\t $[q]uit - Encerra o programa.");
                 log("\t $[h]elp - Mostra essa mensagem de ajuda.");
@@ -198,13 +220,13 @@ pub async fn eval(
             // Se chegou aqui, o comando ${input} não existe
             err("Este comando não existe");
             continue;
-            
+
         }
         // Mensagens normais (DMs e broadcasts)
         let msg = if line.starts_with('@') {
             if let Some((peer_name, text)) = line.split_once(' ') {
                 let peer_name = peer_name.strip_prefix('@').unwrap_or(peer_name);
-                if let Some(peer) = peer_registry.lock().get(peer_name) {
+                if let Some(peer) = app_state.peer_registry.lock().get(peer_name) {
                     server::FNP::Message {
                         rem: my_peer.clone(),
                         dest: peer.clone(),
