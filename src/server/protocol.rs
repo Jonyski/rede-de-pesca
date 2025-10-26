@@ -19,12 +19,12 @@
  * FNP 1.0;
  * REM: (fnp://user@127.0.0.1:6000);
  * DEST: (*|fnp://user@129.0.0.1:4848);
- * CMD: (Message|Inspection|InvetoryShowcase|Broadcast|TradeOffer|TradeConfirm|AnnounceName|PeerList);
- * [Content|Invetory|Offer|OfferResponse|Peers]: *;
+ * CMD: (Message|Inspection|InventoryShowcase|Broadcast|TradeOffer|TradeConfirm|AnnounceName|PeerList);
+ * [Content|Inventory|Offer|OfferResponse|Peers]: *;
  *
  *
  * Content: "text"
- * Invetory: fish|10, fish2|100;
+ * Inventory: fish|10, fish2|100;
  * Offer: fish1|10 > fish2|10;
  * OfferResponse: true|false;
  * Peers: user1@127.0.0.1:6000,user2@127.0.0.1:6001;
@@ -191,11 +191,11 @@ impl FNPParser {
                     fields.get("Offer").ok_or("No Offer")?,
                 ))?,
             }),
-            "InvetoryShowcase" => Ok(FNP::InventoryShowcase {
+            "InventoryShowcase" => Ok(FNP::InventoryShowcase {
                 rem,
                 dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
                 inventory: Inventory::from_str(&unescape_semicolons(
-                    fields.get("Invetory").ok_or("No Invetory")?,
+                    fields.get("Inventory").ok_or("No Inventory")?,
                 ))?,
             }),
             "InventoryInspection" => Ok(FNP::InventoryInspection {
@@ -324,7 +324,7 @@ impl Display for FNP {
                         .collect(),
                 };
                 format!(
-                    "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InvetoryShowcase; Invetory: {inventory};"
+                    "FNP 1.0; REM: {rem}; DEST: {dest}; CMD: InventoryShowcase; Inventory: {inventory};"
                 )
             }
             FNP::AnnounceName { rem } => {
@@ -746,8 +746,8 @@ mod tests {
         let protocol = r#"
             REM: fnp://user@127.0.0.1:6000;
             DEST: fnp://user2@129.0.0.1:4848;
-            CMD: InvetoryShowcase;
-            Invetory: goldfish|10, shark|1, tuna|5;
+            CMD: InventoryShowcase;
+            Inventory: goldfish|10, shark|1, tuna|5;
         "#;
 
         match FNPParser::parse(protocol) {
@@ -879,8 +879,8 @@ mod tests {
         let protocol = r#"
             REM: fnp://user@127.0.0.1:6000;
             DEST: fnp://user2@129.0.0.1:4848;
-            CMD: InvetoryShowcase;
-            Invetory: invalid;
+            CMD: InventoryShowcase;
+            Inventory: invalid;
         "#;
 
         let result = FNPParser::parse(protocol);
