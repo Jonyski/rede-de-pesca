@@ -46,7 +46,7 @@ pub async fn dispatch(
     while let Ok(event) = receiver.recv().await {
         match event {
             Event::PeerDisconnected(socket_addr) => {
-                handlers::handle_peer_disconnected(&server.clone(), socket_addr).await;
+                handlers::handle_peer_disconnected(&app_state.clone(), &server.clone(), socket_addr).await;
             }
             Event::ServerMessage(fnp, socket_addr) => {
                 handlers::handle_server_message(
