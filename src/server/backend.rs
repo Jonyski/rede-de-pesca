@@ -126,7 +126,7 @@ impl ServerBackend {
     }
 
     /// Hadler de conexões, adiciona a lista de conexões e cria nova task para ler
-    ///  mensagens e enviar a um channel
+    /// mensagens e enviar a um channel
     async fn handle_connection(
         &self,
         addr: net::SocketAddr,

@@ -136,8 +136,8 @@ pub async fn handle_ui_message(app_state: &AppState, msg: FNP, server_sender: Se
         } => {
             handle_ui_tradeconfirm(app_state, *response, offer, dest).await;
         }
-        FNP::TradeOffer { dest, offer, .. } => {
-            handle_ui_tradeoffer(app_state, dest, offer).await;
+        FNP::TradeOffer { .. } => {
+            handle_ui_tradeoffer().await;
         }
         _ => (),
     }
@@ -407,12 +407,7 @@ async fn handle_ui_inventory_inspection(app_state: &AppState) {
     }
 }
 
-async fn handle_ui_tradeoffer(app_state: &AppState, dest: &Peer, offer: &Offer) {
-    app_state
-        .offer_buffers
-        .lock()
-        .offers_made
-        .insert(dest.address(), offer.clone());
+async fn handle_ui_tradeoffer() {
     crate::tui::log("-- OFERTA FEITA --");
 }
 

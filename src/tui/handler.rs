@@ -117,6 +117,11 @@ pub async fn handle_command(
                             }
                         }
                         if is_valid {
+                            app_state
+                                .offer_buffers
+                                .lock()
+                                .offers_made
+                                .insert(peer_info.peer.address(), parsed_offer.clone());
                             sender
                                 .send(Event::UIMessage(server::FNP::TradeOffer {
                                     rem: my_peer.clone(),
