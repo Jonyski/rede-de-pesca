@@ -174,7 +174,21 @@ async fn handle_server_announce_name(
 ) {
     // Anúncio de nome e conexão, atualiza o registro de peers
     // Primeiro, verifica se o nome de usuário já está em uso
-    handle_rejection_messages(server, &rem, client_addr).await;
+    if let Some(existing_peer) = server
+        .peer_store()
+        .get_by_username(&rem.username())
+        .await
+    {
+        // Se o nome de usuário já estiver em uso por outro endereço, rejeita a conexão
+        if existing_peer.peer.address() != rem.address() {
+            handle_rejection_messages(server, &rem, client_addr).await;
+            return;
+        } else { // Se for o mesmo endereço
+            // Remove a conexão duplicada
+            server.connections().lock().remove(&client_addr);
+            return;
+        }
+    }
 
     // Se ainda não temos esse peer registrado
     if server
