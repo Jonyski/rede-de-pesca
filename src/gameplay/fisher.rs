@@ -65,7 +65,7 @@ impl FishCatalog {
             shiny: vec![
                 String::from("botia-beijadora"),
                 String::from("peixe-filhote-de-diabo"),
-                String::from("peixe-mão vermelho"),
+                String::from("peixe-mão-vermelho"),
                 String::from("peixe-anjo-rainha"),
                 String::from("peixe-lanterna"),
                 String::from("dragão-marinho-comum"),
@@ -88,7 +88,7 @@ impl FishCatalog {
                 String::from("raia-jamanta"),
                 String::from("polvo-de-anéis-azuis"),
                 String::from("peixe-mandarim"),
-                String::from("peixe-morcego de lábios vermelhos"),
+                String::from("peixe-morcego-de-lábios-vermelhos"),
             ],
             // Peixes abissais: 0.5% de ocorrência
             abyssals: vec![
@@ -117,6 +117,25 @@ impl FishCatalog {
             Style::new().fg_rgb::<80, 150, 255>().bold()
         } else {
             Style::new().fg_rgb::<100, 255, 160>().bold()
+        }
+    }
+    /// Retorna um "rank" de raridade para um peixe
+    /// 0 = comum, 6 = abissal
+    pub fn get_rarity_rank(&self, fish_name: &str) -> u8 {
+        if self.abyssals.iter().any(|f| f == fish_name) {
+            6
+        } else if self.mythicals.iter().any(|f| f == fish_name) {
+            5
+        } else if self.legendaries.iter().any(|f| f == fish_name) {
+            4
+        } else if self.shiny.iter().any(|f| f == fish_name) {
+            3
+        } else if self.epics.iter().any(|f| f == fish_name) {
+            2
+        } else if self.rares.iter().any(|f| f == fish_name) {
+            1
+        } else {
+            0
         }
     }
 }

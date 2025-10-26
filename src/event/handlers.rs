@@ -235,13 +235,22 @@ async fn handle_server_inventory_request(
     server: &ServerBackend,
     server_sender: Sender<FNP>,
 ) {
-    let inventory_items: Vec<server::InventoryItem> = app_state
-        .basket
-        .lock()
+    let basket = app_state.basket.lock();
+
+    let mut inventory_items: Vec<server::InventoryItem> = basket
         .map()
         .iter()
         .map(|(k, v)| server::InventoryItem::new(k.to_string(), *v))
         .collect();
+
+    drop(basket);
+
+    // Ordena o vetor de itens com base na raridade
+    inventory_items.sort_by(|a, b| {
+        let rank_a = app_state.fish_catalog.get_rarity_rank(&a.fish_type);
+        let rank_b = app_state.fish_catalog.get_rarity_rank(&b.fish_type);
+        rank_a.cmp(&rank_b)
+    });
 
     let fnp = server::FNP::InventoryShowcase {
         rem: server.host(),
@@ -250,6 +259,7 @@ async fn handle_server_inventory_request(
             items: inventory_items,
         },
     };
+
     server_sender.send(fnp).await.ok();
 }
 
@@ -381,7 +391,16 @@ async fn handle_ui_inventory_inspection(app_state: &AppState) {
     if inventory.map().is_empty() {
         crate::tui::log("[Nenhum peixe aqui, digite $[p]esca para pescar]");
     } else {
-        for (fish_type, quantity) in inventory.map().iter() {
+        let mut items: Vec<(&String, &u32)> = inventory.map().iter().collect();
+
+        // Ordenando a lista de peixes com base na raridade para exibição
+        items.sort_by(|(fish_a, _), (fish_b, _)| {
+            let rank_a = app_state.fish_catalog.get_rarity_rank(fish_a);
+            let rank_b = app_state.fish_catalog.get_rarity_rank(fish_b);
+            rank_a.cmp(&rank_b)
+        });
+
+        for (fish_type, quantity) in items {
             let style = app_state.fish_catalog.get_style_for_fish(fish_type);
             println!("> [{}] {}", quantity, style.style(fish_type));
         }
