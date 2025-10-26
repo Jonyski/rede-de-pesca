@@ -77,6 +77,10 @@ pub enum FNP {
         dest: Peer,
         peers: Vec<Peer>,
     },
+    RejectConnection {
+        rem: Peer,
+        dest: Peer,
+    },
 }
 
 impl FNP {
@@ -89,7 +93,8 @@ impl FNP {
             | FNP::InventoryInspection { rem, .. }
             | FNP::InventoryShowcase { rem, .. }
             | FNP::AnnounceName { rem }
-            | FNP::PeerList { rem, .. } => rem,
+            | FNP::PeerList { rem, .. }
+            | FNP::RejectConnection { rem, .. } => rem,
         }
     }
 
@@ -101,11 +106,11 @@ impl FNP {
             | FNP::TradeConfirm { dest, .. }
             | FNP::InventoryInspection { dest, .. }
             | FNP::InventoryShowcase { dest, .. }
-            | FNP::PeerList { dest, .. } => Some(dest),
+            | FNP::PeerList { dest, .. }
+            | FNP::RejectConnection { dest, .. } => Some(dest),
         }
     }
 
-    // This function was already correct, but is included for completeness.
     pub fn set_rem(self, rem: Peer) -> Self {
         match self {
             FNP::Message { dest, content, .. } => FNP::Message { rem, dest, content },
@@ -132,6 +137,7 @@ impl FNP {
             },
             FNP::AnnounceName { .. } => FNP::AnnounceName { rem },
             FNP::PeerList { dest, peers, .. } => FNP::PeerList { rem, dest, peers },
+            FNP::RejectConnection { dest, .. } => FNP::RejectConnection { rem, dest },
         }
     }
 }
@@ -215,6 +221,10 @@ impl FNPParser {
                     peers,
                 })
             }
+            "RejectConnection" => Ok(FNP::RejectConnection {
+                rem,
+                dest: Peer::from_str(fields.get("DEST").ok_or("No DEST")?)?,
+            }),
             _ => Err(format!("Unknown CMD: {}", cmd)),
         }
     }
@@ -337,6 +347,9 @@ impl Display for FNP {
                     .collect::<Vec<_>>()
                     .join(",");
                 format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: PeerList; Peers: {peers_str};")
+            }
+            FNP::RejectConnection { rem, dest } => {
+                format!("FNP 1.0; REM: {rem}; DEST: {dest}; CMD: RejectConnection;")
             }
         };
         write!(f, "{}", s)

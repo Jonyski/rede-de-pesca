@@ -12,7 +12,11 @@ use std::net::{self, SocketAddr};
 
 /// Handler para quando um peer se disconecta.
 /// Remove da lista de peers conhecidos e anuncia ao usuário
-pub async fn handle_peer_disconnected(app_state: &AppState, server: &ServerBackend, client_addr: net::SocketAddr) {
+pub async fn handle_peer_disconnected(
+    app_state: &AppState,
+    server: &ServerBackend,
+    client_addr: net::SocketAddr,
+) {
     if let Some(peer_info) = server.peer_store().unregister_by_client(&client_addr).await {
         let peer = peer_info.peer;
         crate::tui::log(&format!(
@@ -27,12 +31,16 @@ pub async fn handle_peer_disconnected(app_state: &AppState, server: &ServerBacke
                 peer.username()
             ));
         }
-        if offer_buffers.offers_received.remove(&peer.address()).is_some() {
+        if offer_buffers
+            .offers_received
+            .remove(&peer.address())
+            .is_some()
+        {
             crate::tui::log(&format!(
                 "Oferta recebida de {} foi cancelada.",
                 peer.username()
             ));
-        }   
+        }
     } else {
         crate::tui::err(&format!(
             "Peer desconhecido se desconectou: {}",
@@ -97,6 +105,9 @@ pub async fn handle_server_message(
         FNP::PeerList { rem, peers, .. } => {
             handle_server_peerlist(&peers, server, rem, event_sender).await;
         }
+        FNP::RejectConnection { .. } => {
+            handle_rejection().await;
+        }
     }
 }
 
@@ -134,17 +145,13 @@ pub async fn handle_ui_message(app_state: &AppState, msg: FNP, server_sender: Se
     server_sender.send(msg).await.ok();
 }
 
-async fn handle_rejection_messages(server: &ServerBackend, rem: &Peer, client_addr: SocketAddr){
-    let reject_msg = FNP::Message {
+async fn reject_homonym(server: &ServerBackend, rem: &Peer, client_addr: SocketAddr) {
+    let reject_msg = FNP::RejectConnection {
         rem: server.host(),
         dest: rem.clone(),
-        content: format!(
-            "Erro: Nome de usuário '{}' já está em uso. Conexão rejeitada.",
-            rem.username()
-        ),
     };
     if let Some(conn) = server.connections().lock().get(&client_addr).cloned() {
-       conn.send_fnp(&reject_msg).await.ok();
+        conn.send_fnp(&reject_msg).await.ok();
     }
     server.connections().lock().remove(&client_addr);
     crate::tui::err(&format!(
@@ -154,16 +161,12 @@ async fn handle_rejection_messages(server: &ServerBackend, rem: &Peer, client_ad
     ));
 }
 
-async fn handle_name_conflict(content: &str) {
-    if content.starts_with("Erro: Nome de usuário") && content.ends_with("Conexão rejeitada.") {
-        crate::tui::err("-----------------------------------------------------");
-        crate::tui::err("FALHA AO CONECTAR: Nome de usuário já está em uso!");
-        crate::tui::err("Por favor, reinicie a aplicação com um nome diferente.");
-        crate::tui::err("-----------------------------------------------------");
-        // Espera 2 segundos antes de fechar para o usuário ler a mensagem
-        smol::Timer::after(std::time::Duration::from_secs(2)).await;
-        std::process::exit(1);
-    }
+async fn handle_rejection() {
+    crate::tui::err("------------------------------------------------------");
+    crate::tui::err("FALHA AO CONECTAR: Nome de usuário já está em uso!");
+    crate::tui::err("Por favor, reinicie a aplicação com um nome diferente.");
+    crate::tui::err("------------------------------------------------------");
+    std::process::exit(1);
 }
 
 async fn handle_server_announce_name(
@@ -174,20 +177,23 @@ async fn handle_server_announce_name(
 ) {
     // Anúncio de nome e conexão, atualiza o registro de peers
     // Primeiro, verifica se o nome de usuário já está em uso
-    if let Some(existing_peer) = server
-        .peer_store()
-        .get_by_username(&rem.username())
-        .await
-    {
+    if let Some(existing_peer) = server.peer_store().get_by_username(rem.username()).await {
         // Se o nome de usuário já estiver em uso por outro endereço, rejeita a conexão
         if existing_peer.peer.address() != rem.address() {
-            handle_rejection_messages(server, &rem, client_addr).await;
+            reject_homonym(server, &rem, client_addr).await;
             return;
-        } else { // Se for o mesmo endereço
+        } else {
+            // Se for o mesmo endereço
             // Remove a conexão duplicada
             server.connections().lock().remove(&client_addr);
             return;
         }
+    }
+    // Depois, verifica se o peer não está tentando usar seu nome
+    // Rejeita sua conexão se este for for o caso
+    if rem.username() == server.host().username() {
+        reject_homonym(server, &rem, client_addr).await;
+        return;
     }
 
     // Se ainda não temos esse peer registrado
@@ -217,8 +223,6 @@ async fn handle_server_announce_name(
 
 async fn handle_server_direct_message(rem: Peer, content: &str) {
     println!("DM de {}: {}", rem.username(), content);
-    // Se for uma mensagem de conflito de nome, trata
-    handle_name_conflict(content).await;
 }
 
 async fn handle_server_broadcast_message(rem: Peer, content: &str) {

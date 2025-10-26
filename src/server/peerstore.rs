@@ -98,7 +98,7 @@ impl PeerStore {
     /// Retorna informações do peer com base no seu username.
     pub async fn get_by_username(&self, username: &str) -> Option<PeerInfo> {
         if let Some(listener) = self.name_addr_map.lock().get(username) {
-            self.get_by_listener(&listener).await
+            self.get_by_listener(listener).await
         } else {
             None
         }

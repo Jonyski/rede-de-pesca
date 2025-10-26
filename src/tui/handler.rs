@@ -23,7 +23,15 @@ pub async fn handle_command(
         Command::List => {
             log("-- PESCADORES ONLINE --");
             for peer in peer_store.all_pears().await {
-                log(&format!("> {} ({})", peer.username(), peer.address()));
+                log(&format!(
+                    "> {} ({})",
+                    peer.username(),
+                    peer_store
+                        .get_by_username(peer.username())
+                        .await
+                        .unwrap()
+                        .client_addr
+                ));
             }
         }
         Command::Inventario(name) => {
@@ -74,7 +82,7 @@ pub async fn handle_command(
                             guard.offers_made.clone()
                         };
 
-                        // First, calculate how many of each fish are tied up in other offers
+                        // Calculamos quantos peixes de cada tipo estão em outras ofertas abertas
                         let mut offered_quantities: std::collections::HashMap<String, u32> =
                             std::collections::HashMap::new();
                         for existing_offer in offers_made.values() {
@@ -86,7 +94,8 @@ pub async fn handle_command(
                         }
 
                         let mut is_valid = true;
-                        // Now, validate the new offer against the available amount
+                        // Validando a troca atual de acordo com a quantidade de peixes não
+                        // comprometida
                         for item_to_offer in &parsed_offer.offered {
                             let total_in_inventory = basket_snapshot
                                 .get(&item_to_offer.fish_type)

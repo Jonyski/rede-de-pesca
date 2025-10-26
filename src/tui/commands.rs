@@ -8,9 +8,9 @@
 //!  - `$l` / `$listar`
 //!  - `$i` / `$inventario` [<peer>]
 //!  - `$t` / `$troca` <peer> <offer...>
-/// - `$c` / `$confirmar` <s|n> <peer>
-/// - `$q` / `$quit`
-/// - `$h` / `$help`
+//!  - `$c` / `$confirmar` <s|n> <peer>
+//!  - `$q` / `$quit`
+//!  - `$h` / `$help`
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Command {
@@ -37,7 +37,7 @@ pub fn parse_command(line: &str) -> Option<Command> {
     }
 
     let parts = line.split_whitespace().collect::<Vec<_>>();
-    let cmd = parts.get(0).map(|s| s.to_lowercase()).unwrap_or_default();
+    let cmd = parts.first().map(|s| s.to_lowercase()).unwrap_or_default();
     match cmd.as_str() {
         "$p" | "$pescar" => Some(Command::Pescar),
         "$l" | "$listar" => Some(Command::List),
@@ -69,7 +69,6 @@ pub fn parse_command(line: &str) -> Option<Command> {
 }
 
 /*
- *
  * Testes gerados pelo ChatGpt 5.0 mini
  */
 #[cfg(test)]
